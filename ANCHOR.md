@@ -67,6 +67,7 @@
 
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
 - 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
+  **GitHub Pages 在线版已开通**：<https://viola0723.github.io/qr-airbridge/>（push 后自动重建，1~3 分钟生效）——https 环境是手机端最佳姿势（摄像头安全上下文 + iPhone worker 档解锁），推荐日常使用。
 - 当前基线：`backups/index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）。改崩了直接拷回覆盖。
 - 历史基线：`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
@@ -171,6 +172,7 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   接管成功；900B@24FPS 解码 50+/s，反超安卓机（worker 档 ~10/s）。
   worker 失败根因已回报：`worker报错: Script error`——WebKit 在不透明源页面（file:// / App 内文件预览）拦截
   blob worker 且脱敏错误内容（http(s) 页面下 Safari 的 blob worker 正常；如需 worker 档可经本地 http 服务打开页面）。
+  **GitHub Pages（https）实测闭环（2026-08-04，同机）**：envCheck 显示 `ZXing-wasm✓`，一级 worker 档复活——根因推断确认。
 
 **v1.3.2 = 滑块上限上调（给强机余量）**
 - FPS 上限 24→30、单帧上限 900→1200（默认值 8/450 不变；弱机自行调低即可）。
