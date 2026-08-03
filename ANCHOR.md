@@ -1,7 +1,7 @@
 # QR-AirBridge · 项目锚点
 
 > 给新会话的快速定位文件。技术调研与迭代路线见同目录 `RESEARCH.md`。
-> 最后更新：2026-08-04（①②已落地并真机复测通过；v1.3.1 补苹果二级降级、v1.3.2 滑块上限 FPS 30/单帧 1200；下一步 = 远期 #4 工装 / #5 光学时序 / #6 彩色网格）
+> 最后更新：2026-08-04（①②已落地并真机复测通过；v1.3.1 补苹果二级降级、v1.3.2 滑块上限 FPS 30/单帧 1200；**已开源 <https://github.com/viola0723/qr-airbridge>**；下一步 = 远期 #4 工装 / #5 光学时序 / #6 彩色网格）
 
 ## 这是什么
 
@@ -66,6 +66,7 @@
 ## 备份策略
 
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
+- 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
 - 当前基线：`backups/index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）。改崩了直接拷回覆盖。
 - 历史基线：`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
