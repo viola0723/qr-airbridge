@@ -98,11 +98,11 @@
       <h2>2 · 参数与发射</h2>
       <div class="optrow">
         <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">8</span> FPS</label>
-        <input type="range" id="fpsRange" min="1" max="30" value="8" oninput="onFps(this.value)">
+        <input type="range" id="fpsRange" min="1" max="50" value="8" oninput="onFps(this.value)">
       </div>
       <div class="optrow">
         <label>单帧 <span id="sizeVal" style="color:var(--blue);font-weight:800;">450</span> B</label>
-        <input type="range" id="sizeRange" min="300" max="1200" step="50" value="450" oninput="onSize(this.value)">
+        <input type="range" id="sizeRange" min="300" max="1300" step="50" value="450" oninput="onSize(this.value)">
       </div>
       <div class="optrow">
         <label><input type="checkbox" id="chkCompress" checked> 压缩(deflate)</label>
@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.3.2 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.4.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3010,7 +3010,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.3.2';
+    ' 解码器:' + dec + ' · v1.4.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3138,6 +3138,7 @@ function logSend(m){ const l=$('sendLog'); l.textContent += '> ' + m + '\n'; l.s
 async function toggleScan(){
   if (recv.starting) return;  // 防连点：getUserMedia 异步，连点会泄漏多条流
   if (recv.active) { await stopAllScanning(); return; }
+  ensureAudio();  // 同步跑在点击手势栈里：iOS 只认这个窗口解锁 AudioContext
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return alert('此浏览器不支持摄像头调用，请用系统浏览器打开（微信内请点右上角→在浏览器打开）');
   }
@@ -3433,6 +3434,32 @@ function updateRecvUI(){
   $('progBar').style.width = pct + '%';
   $('recvPct').textContent = pct + '%';
 }
+/* 完成提示音：Web Audio 即时合成，免音频资源，保住单文件离线。
+   iOS 要求用户手势后才能出声——在 toggleScan（点启动摄像头）里预热解锁。 */
+let audioCtx = null;
+function ensureAudio(){
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* 无音频设备时静默跳过 */ }
+}
+function playTone(freq, t0, dur, type){
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+/* 校验通过：上行三音 chime；校验失败：低双音告警 */
+function playDoneSound(ok){
+  ensureAudio();
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  if (ok) { playTone(659.25, t, 0.18); playTone(880, t + 0.12, 0.18); playTone(1318.5, t + 0.24, 0.35); }
+  else { playTone(220, t, 0.2, 'square'); playTone(196, t + 0.22, 0.3, 'square'); }
+}
 async function finalizeRecv(){
   const r = recv.receiver;
   const out = await r.assemble();
@@ -3444,6 +3471,8 @@ async function finalizeRecv(){
   // SHA 校验
   const ok = await r.verify(out);
   $('okInfo').textContent += ok ? ' · SHA-256 ✓' : ' · ⚠️ 校验失败';
+  playDoneSound(ok);
+  if (navigator.vibrate) navigator.vibrate(ok ? [80, 60, 120] : 300);
   $('dlBtn').onclick = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([out]));
