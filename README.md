@@ -30,6 +30,8 @@ QR-AirBridge moves files across an air gap over a one-way visual channel:
 | Android phone | 450 B @ 16–20 FPS | ≈ 8 KB/s effective |
 | Android phone | 900 B @ 24 FPS | ~10 decodes/s |
 | iPhone | 1200 B @ 30 FPS | ~50 decodes/s — 36 KB/s supply near-saturated |
+| Android phone | 1300 B @ 50 FPS | ~10 decodes/s — decode-limited, no gain from maxing out |
+| iPhone | 1300 B @ 50 FPS | ~30 decodes/s — past the FPS knee, rate drops; sweet spot back at 24–30 FPS |
 
 Your mileage will vary — the visual channel depends on the camera and the screen. Tune the FPS / frame-size sliders while watching the live stats line (扫描/解码 per second).
 
@@ -74,6 +76,8 @@ Fixed-length header, no separators. A seed-driven PRNG (LCG-16807) reproduces th
 | 安卓手机 | 450B @ 16–20 FPS | ≈ 8 KB/s 有效吞吐 |
 | 安卓手机 | 900B @ 24 FPS | 解码 ~10/s |
 | iPhone | 1200B @ 30 FPS | 解码 ~50/s，36 KB/s 供给接近打满 |
+| 安卓手机 | 1300B @ 50 FPS | 解码 ~10/s——算力受限，拉满无收益 |
+| iPhone | 1300B @ 50 FPS | 解码 ~30/s——FPS 过膝点回落，甜点位回 24~30 FPS 区间 |
 
 视觉通道看设备——相机和屏幕都影响命中率。盯着统计行（扫描/解码每秒）调滑块：
 先抬 FPS，再抬单帧，解码跟不上了就回退一格。
