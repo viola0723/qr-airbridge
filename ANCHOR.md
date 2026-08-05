@@ -1,7 +1,7 @@
 # QR-AirBridge · 项目锚点
 
 > 给新会话的快速定位文件。技术调研与迭代路线见同目录 `RESEARCH.md`。
-> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；**v1.5.0 已发布：#7 BarcodeDetector 原生第零档 + UI 修复两项，待安卓真机复测**；下一步 = v1.5.0 真机复测 → decode 侧 #9→#8→#10（安卓）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
+> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；**v1.5.0 已发布：#7 BarcodeDetector 原生第零档 + UI 修复两项；v1.5.1 探测可诊断（3s 超时 + envCheck 显示跳过原因），待安卓真机复测**；下一步 = 真机复测 → decode 侧 #9→#8→#10（安卓）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
 
 ## 这是什么
 
@@ -79,8 +79,8 @@
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
 - 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
   **GitHub Pages 在线版已开通**：<https://viola0723.github.io/qr-airbridge/>（push 后自动重建，1~3 分钟生效）——https 环境是手机端最佳姿势（摄像头安全上下文 + iPhone worker 档解锁），推荐日常使用。
-- 当前基线：`backups/index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）。改崩了直接拷回覆盖。
-- 历史基线：`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
+- 当前基线：`backups/index-v1.5.1-20260805.html`（#7 原生第零档 + 探测可诊断 + UI 修复两项）。改崩了直接拷回覆盖。
+- 历史基线：`index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）、`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
 ## index.html 结构地图（行号会漂移，以区段注释为准）
 
@@ -233,6 +233,17 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   tab 记忆 hack 保留（应对手动刷新/后台回收），switchTab 注释已同步。
 - 验证：app 块 `node --check` OK；Electron 运行时断言全过（徽标回「自动」；resetAll 后 receiver=null /
   TID 清空 / 计数清零 / 双卡隐藏 / 扫描按钮文案复原）；两tab 界面截图无破版。
+
+**v1.5.1 = #7 探测可诊断（2026-08-05，用户安卓机未见「原生✓」后定位用）**
+- 背景：v1.5.0 用户安卓机 envCheck 显示 `ZXing-wasm✓` 无「原生✗」= 探测阶段静默跳过，原因不可见
+  （候选：旧版缓存 / 非 Chrome 浏览器无 API / 真 Chrome 无 GMS 后端导致 formats 无 qr_code）。
+- 改动：`initBarcodeDetector` 加 **3s 探测超时**（formats 查询挂起不能永远等）；
+  跳过原因写入 `bd.skip`（无API/无qr_code/探测超时/异常:*）并显示在 envCheck（`(原生✗:原因)` 后缀，
+  与 failWasm 诊断同风格）；版本号 v1.5.1。
+- 验证：node 探测矩阵 harness **11 断言全绿**（正常/无API/无qr_code/挂起超时/异常 五路的 ready、skip、
+  envCheck 文案全对，harness 用后已删）；Electron 注入 `delete window.BarcodeDetector` 截图确认
+  envCheck 显示「ZXing-wasm✓（原生✗:无API） · v1.5.1」。
+- **待真机回报**：用户安卓机 envCheck 的「原生✗」后缀原因 = 定位依据（无API→换浏览器；无qr_code→设备无 GMS 后端，安心用 wasm 档；探测超时→后端模块加载不来）。
 
 ## 已知遗留
 

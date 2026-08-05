@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.5.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.5.1 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3008,11 +3008,11 @@ function renderEnvCheck(){
     dec = (typeof ZXing !== 'undefined' ? 'ZXing✓' : 'jsQR') + '(wasm降级' + (why ? ':' + why : '') + ')';
   }
   else dec = typeof ZXing !== 'undefined' ? 'ZXing✓' : (typeof jsQR !== 'undefined' ? 'jsQR(降级)' : '✗');
-  if (bd.failed && !bd.ready) dec += '(原生✗)';
+  if (!bd.ready && (bd.failed || bd.skip)) dec += '(原生✗' + (bd.skip ? ':' + bd.skip : '') + ')';
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.5.0';
+    ' 解码器:' + dec + ' · v1.5.1';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3278,19 +3278,30 @@ function capLadder(r, ok){
    安卓 Chrome 的 Shape Detection API：QR 检测走系统/硬件服务，比 wasm 快一个量级。
    探测两步：'BarcodeDetector' in window + getSupportedFormats() 含 qr_code
    （部分平台构造函数在但无 QR 后端；iOS/桌面 Safari 不支持 → 静默跳过，落回 wasm 三级链）。
-   detect 连续 3 次异常 = 探测通过但服务半坏，退回 wasm 链并记入 envCheck。
+   探测加 3s 超时：部分设备 formats 查询挂起（后端模块加载不来），不能永远等；
+   跳过原因记入 bd.skip 并显示在 envCheck（无API/无qr_code/探测超时/异常），便于真机回报定位。
+   detect 连续 3 次异常 = 探测通过但服务半坏，退回 wasm 链（bd.failed）。
    结果 rawValue 为字符串，v2 帧纯 alphanumeric 正好够用。 */
-let bd = { det:null, ready:false, busy:false, failed:false, errN:0 };
+let bd = { det:null, ready:false, busy:false, failed:false, errN:0, skip:'' };
 async function initBarcodeDetector(){
   try {
-    if (!('BarcodeDetector' in window)) return;
-    const fmts = await BarcodeDetector.getSupportedFormats();
-    if (fmts && fmts.indexOf('qr_code') >= 0) {
+    if (!('BarcodeDetector' in window)) { bd.skip = '无API'; renderEnvCheck(); return; }
+    const fmts = await Promise.race([
+      BarcodeDetector.getSupportedFormats(),
+      new Promise(res => setTimeout(() => res('__timeout__'), 3000))
+    ]);
+    if (fmts === '__timeout__') bd.skip = '探测超时';
+    else if (!fmts || fmts.indexOf('qr_code') < 0) bd.skip = '无qr_code';
+    else {
       bd.det = new BarcodeDetector({ formats: ['qr_code'] });
       bd.ready = true;
-      renderEnvCheck();
     }
-  } catch (e) { console.debug('BarcodeDetector 探测失败:', e && e.message); }
+    renderEnvCheck();
+  } catch (e) {
+    bd.skip = ('异常:' + (e && e.message || e)).slice(0, 16);
+    console.debug('BarcodeDetector 探测失败:', e && e.message);
+    renderEnvCheck();
+  }
 }
 /* 单帧检测：独立小函数便于无头单测；resolve text|null，reject 由调用方计数降级 */
 function bdDetectText(src){
