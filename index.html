@@ -100,6 +100,10 @@
     </div>
     <div class="card">
       <h2>2 · 参数与发射</h2>
+      <div class="btnrow" style="margin-top:10px;">
+        <button class="btn btn-ghost" onclick="presetRecv('ios')" title="苹果接收端实测甜点">🍎 苹果 50·1300</button>
+        <button class="btn btn-ghost" onclick="presetRecv('android')" title="安卓接收端实测最佳">🤖 安卓 50·1300</button>
+      </div>
       <div class="optrow">
         <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">30</span> FPS</label>
         <input type="range" id="fpsRange" min="30" max="50" value="30" oninput="onFps(this.value)">
@@ -179,7 +183,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.8.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.9.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3017,7 +3021,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.8.0';
+    ' 解码器:' + dec + ' · v1.9.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3034,6 +3038,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ============ 发送端 ============ */
+/* 接收端预设：一键到真机实测甜点。视觉通道无反馈，发送端参数无自动配置（硬约束），
+   预设把「看统计行调参」收成一键；拖动条保留，预设只是快捷方式。
+   苹果 = 50/1300（v1.7.1 复测 460KB/17s ≈24KB/s，Web 层光学上限）；
+   安卓 = 50/1300（v1.8.0 复测实测最佳 ≈10KB/s；30/50fps 无差异，取 50 保好条件上限；
+   卡点在手机 ISP 光学供给而非参数；650B 是否更稳无 60fps 相机时代实测，有更优数据改 PRESETS 即可）。 */
+const PRESETS = { ios: { fps: 50, size: 1300 }, android: { fps: 50, size: 1300 } };
+function presetRecv(name){
+  const p = PRESETS[name]; if (!p) return;
+  $('fpsRange').value = p.fps; $('sizeRange').value = p.size;
+  onFps(p.fps); onSize(p.size);
+}
 function onFps(v){ state.fps = +v; $('fpsVal').textContent = v; if(state.isSending) restartTimer(); }
 function onSize(v){ state.chunkSize = +v; $('sizeVal').textContent = v; }
 
