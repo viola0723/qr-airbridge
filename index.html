@@ -68,7 +68,7 @@
   .log{font-family:ui-monospace,monospace; font-size:11px; color:var(--dim); margin-top:10px; max-height:90px; overflow-y:auto; line-height:1.6;}
   /* 全屏发射：QR 铺满屏幕，摄像头端 px/模块 提升 2~3 倍，识别率的关键 */
   .fs-overlay{position:fixed; inset:0; background:#fff; z-index:999; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer;}
-  .fs-overlay canvas{width:92vmin; height:92vmin; image-rendering:pixelated;}
+  .fs-overlay canvas{width:92vmin; height:auto; image-rendering:pixelated;}
   .fs-overlay .fs-tip{color:#334155; margin-top:14px; font-weight:700; font-size:14px;}
   footer{text-align:center; color:#475569; font-size:12px; padding:10px 0 30px;}
 </style>
@@ -97,12 +97,12 @@
     <div class="card">
       <h2>2 · 参数与发射</h2>
       <div class="optrow">
-        <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">8</span> FPS</label>
-        <input type="range" id="fpsRange" min="1" max="50" value="8" oninput="onFps(this.value)">
+        <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">30</span> FPS</label>
+        <input type="range" id="fpsRange" min="30" max="50" value="30" oninput="onFps(this.value)">
       </div>
       <div class="optrow">
-        <label>单帧 <span id="sizeVal" style="color:var(--blue);font-weight:800;">450</span> B</label>
-        <input type="range" id="sizeRange" min="300" max="1300" step="50" value="450" oninput="onSize(this.value)">
+        <label>单帧 <span id="sizeVal" style="color:var(--blue);font-weight:800;">650</span> B</label>
+        <input type="range" id="sizeRange" min="650" max="1300" step="50" value="650" oninput="onSize(this.value)">
       </div>
       <div class="optrow">
         <label><input type="checkbox" id="chkCompress" checked> 压缩(deflate)</label>
@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.6.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.7.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -2975,9 +2975,10 @@ var qrcode = function() {
 const AB = (typeof AirBridge !== 'undefined') ? AirBridge : null;
 /* ================= 全局状态 ================= */
 const $ = id => document.getElementById(id);
-let state = { isSending:false, isPaused:false, frameIdx:0, fps:8, chunkSize:450, timer:null, sender:null, packets:0 };
+let state = { isSending:false, isPaused:false, frameIdx:0, fps:30, chunkSize:650, timer:null, sender:null, packets:0 };
 let recv = { active:false, stream:null, raf:null, receiver:null, tid:'', scanTick:0, cap:0, failN:0, okN:0, roi:null };
 let scanCv = null, scanCvCtx = null;
+let gateCv = null, gateCvCtx = null, bceCv = null, bceCvCtx = null;  // #10 门控 16×16 签名画布 + #5b 信标 4×4 采样画布
 
 /* ============ 微信检测与引导 ============ */
 function isWechat() {
@@ -3012,7 +3013,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.6.0';
+    ' 解码器:' + dec + ' · v1.7.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3111,11 +3112,16 @@ function drawQR(id, value, size=520) {
   const QZ = 4;  // 静区：QR 规范要求四周 ≥4 模块白边，缺失会降低识别率
   const scale = Math.floor(size / (mod + QZ * 2)) || 1;
   const final = (mod + QZ * 2) * scale;
-  canvas.width = final; canvas.height = final;
+  // #5b 帧同步信标：静区之外、画布底部加一条全宽 × 5 模块高的纯色条，随帧序号黑白翻转；
+  // 接收端采样该条判「换帧瞬间的混合帧」（半黑半白）直接跳过。不碰码区与静区，线协议不变。
+  const barH = scale * 5;
+  canvas.width = final; canvas.height = final + barH;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,final,final);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,final,final+barH);
   ctx.fillStyle = '#000000';
   for (let r=0; r<mod; r++) for (let c=0; c<mod; c++) if (qr.isDark(r,c)) ctx.fillRect((c+QZ)*scale, (r+QZ)*scale, scale, scale);
+  ctx.fillStyle = (state.packets % 2) ? '#000000' : '#ffffff';
+  ctx.fillRect(0, final, final, barH);
 }
 function togglePauseSend(){ state.isPaused = !state.isPaused; $('sendStatus').textContent = state.isPaused ? '已暂停' : '播放中'; }
 /* 重置发送：停帧 + 收起播放面板 + 清空已选内容（速度/单帧等调参保留） */
@@ -3199,6 +3205,7 @@ function scanLoop(){
     // - ROI 通道（命中后）：码位置由解码器回传（见 roiTrack），后续帧只裁其邻域 ±35% 送解，
     //   像素量降一个量级、多数情况原分辨率不降采样；连丢 3 帧回退中央全扫。
     // - 深度通道（每 20 帧 1 次）：全帧 ≤1280px 兜底，应对 QR 偏小/不在中央/ROI 失锁再捕获。
+    //   深通道矩形与快速通道不同，天然不被门控跳过（签名不同源），兼作门控的周期性强解活性兜底。
     const vw = video.videoWidth, vh = video.videoHeight;
     const deep = (recv.scans % 20 === 19);
     let sx, sy, sw, sh, dw, dh;
@@ -3218,6 +3225,13 @@ function scanLoop(){
       sx = (vw - sw) >> 1; sy = (vh - sh) >> 1;
       const sc = Math.min(1, CAPS[recv.cap] / sw);
       dw = dh = Math.round(sw * sc);
+    }
+    // #10 换帧门控 + #5b 信标混合帧检测（送解前闸）：画面未变 / 正卡在换帧瞬间 → 跳过本帧
+    //（不送解、不置 busy、不进阶梯与 ROI 计数），解码预算全让给新帧；逃逸阀防误判死锁，见 gateSkip
+    if (gateSkip(video, sx, sy, sw, sh, deep)) {
+      recv.skipN = (recv.skipN || 0) + 1;
+      recv.raf = requestAnimationFrame(scanLoop);
+      return;
     }
     if (!scanCv) { scanCv = document.createElement('canvas'); scanCvCtx = scanCv.getContext('2d', { willReadFrequently: true }); }
     scanCv.width = dw; scanCv.height = dh;
@@ -3303,6 +3317,73 @@ function roiTrack(r, deep, hit, pos){
   } else if (!deep && r.roi) {
     if (++r.roi.miss >= ROI_MAX_MISS) r.roi = null;  // 连续丢失：回退中央全扫（深度通道不罚）
   }
+}
+/* ===== #10 换帧检测门控 + #5b 帧同步信标（RESEARCH §8/§6）=====
+   门控：采帧后先把裁剪区降采样成 16×16 亮度签名，与上一帧同位签名比对——
+   画面未变（发送端没出新帧 / 同一视频帧被 rAF 重采）则跳过送解。
+   v1.3.2 实测每帧平均重复解码 1.7 次，这部分预算全让给新帧；iOS 主线程档解一个是一个，收益最直接。
+   信标：发送端码下静区外有一条随帧黑白翻转的纯色条（见 drawQR），已知码位置（ROI）时采样之——
+   条读数半黑半白 = 相机曝光正卡在换帧瞬间（混合帧，必解不出），跳过；纯净（全黑/全白）放行。
+   旧发送端无条时采样落在全屏白底/面板深色底上 = 判纯净 → 门控退化为仅 #10（fail-open，可混发收）。
+   已知限制：假设手机竖屏正对；横转时采样落偏 → 连跳触发逃逸阀强制放行，退化为无信标行为，不死锁。 */
+const GATE_DIFF_TH = 8;    // 16×16 签名均差阈值（0-255 亮度）：静态场景相机噪声 <5，QR 换帧 >>20
+const GATE_MAX_SKIP = 15;  // 逃逸阀：连续跳过上限（≈0.5s@30fps），到顶强制送解一次防门控误判死锁
+const BCE_DARK_TH = 0.45, BCE_WHITE_TH = 0.80;  // 信标行均值归一阈值：含黑行(<0.45)或全白(>0.80)=纯净，中间=混合帧
+/* 纯判定（独立小函数便于无头单测）：same=签名一致，blend=信标混合；返回 true=跳过本帧 */
+function gateJudge(r, same, blend){
+  if (!same && !blend) { r._gateSkips = 0; return false; }
+  if ((r._gateSkips || 0) >= GATE_MAX_SKIP) { r._gateSkips = 0; return false; }  // 逃逸阀
+  r._gateSkips = (r._gateSkips || 0) + 1;
+  return true;
+}
+/* 16×16 亮度签名比对：均差 < 阈值判同帧（独立小函数便于无头单测） */
+function sigSame(a, b){
+  if (!a || !b || a.length !== b.length) return false;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+  return s / a.length < GATE_DIFF_TH;
+}
+/* 信标条判定（行剖面归一，对几何误差免疫）：采码下一窄竖带（覆盖静区下部+信标条），
+   8 行取行均值，用最亮行当白参照——含黑行（黑条）或全带均匀（白条/白底/旧发送端无条）
+   = 纯净放行；行均值落在中间灰（条区半黑半白）= 换帧混合帧 → 跳过。
+   带位置按码角 bbox 标定（码下 1%~8% 边长 = 静区 4 模块内缘 + 条 5 模块）；
+   对定位中心/含静区 bbox 语义漂移同样兼容（行剖面只要求带内有条行）。条出画返回 null = 放弃判。 */
+function beaconJudge(video){
+  const roi = recv.roi; if (!roi) return null;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const bw = Math.max(4, Math.round(roi.w * 0.40)), bh = Math.max(8, Math.round(roi.h * 0.07));
+  const bx = Math.round(roi.x + roi.w * 0.30), by = Math.round(roi.y + roi.h * 1.01);
+  if (bx < 0 || by < 0 || bx + bw > vw || by + bh > vh) return null;
+  if (!bceCv) { bceCv = document.createElement('canvas'); bceCv.width = 4; bceCv.height = 8; bceCvCtx = bceCv.getContext('2d', { willReadFrequently: true }); }
+  bceCvCtx.drawImage(video, bx, by, bw, bh, 0, 0, 4, 8);
+  const d = bceCvCtx.getImageData(0, 0, 4, 8).data;
+  let lo = 255, hi = 0;
+  for (let r = 0; r < 8; r++) {
+    let s = 0;
+    for (let c = 0; c < 4; c++) { const i = (r * 4 + c) * 4; s += (d[i]*77 + d[i+1]*150 + d[i+2]*29) >> 8; }
+    const m = s / 4;
+    if (m < lo) lo = m;
+    if (m > hi) hi = m;
+  }
+  if (hi < 16) return false;   // 全暗带（异常姿态）：无白参照，放行
+  const ratio = lo / hi;
+  return ratio >= BCE_DARK_TH && ratio <= BCE_WHITE_TH;  // true = 混合帧
+}
+/* 门控入口（scanLoop 送解前调用）：true = 本帧跳过。签名画布 16×16 常驻，一次小 drawImage + 1KB
+   getImageData，成本可忽略；深通道与快速通道签名不同源（矩形不同）天然互判「变」，深通道每 20 帧
+   强解一次兼作活性兜底。 */
+function gateSkip(video, sx, sy, sw, sh, deep){
+  if (!gateCv) { gateCv = document.createElement('canvas'); gateCv.width = 16; gateCv.height = 16; gateCvCtx = gateCv.getContext('2d', { willReadFrequently: true }); }
+  gateCvCtx.drawImage(video, sx, sy, sw, sh, 0, 0, 16, 16);
+  const px = gateCvCtx.getImageData(0, 0, 16, 16).data;
+  const sig = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) sig[i] = (px[i*4]*77 + px[i*4+1]*150 + px[i*4+2]*29) >> 8;
+  const g = recv._gate || (recv._gate = { sig:null, sx:0, sy:0, sw:0, sh:0, deep:false });
+  const same = !deep && !g.deep && g.sx === sx && g.sy === sy && g.sw === sw && g.sh === sh && sigSame(sig, g.sig);
+  g.sig = sig; g.sx = sx; g.sy = sy; g.sw = sw; g.sh = sh; g.deep = deep;
+  let blend = false;
+  if (!same && !deep && recv.roi) blend = beaconJudge(video) === true;
+  return gateJudge(recv, same, blend);
 }
 /* ===== BarcodeDetector 原生第零档（RESEARCH §8 #7）=====
    安卓 Chrome 的 Shape Detection API：QR 检测走系统/硬件服务，比 wasm 快一个量级。
@@ -3420,11 +3501,28 @@ async function decodeViaWasmMain(img, dw, dh, deep){
 }
 /* 解码回填（bd/wasm 四条路径共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道；
    pos = 码在送解图像中的 bbox（#9 ROI，可为 null），roiTrack 据此换算视频坐标维护跟踪状态 */
+/* #5a 对焦锁定（能力探测，保守落地）：focusMode 支持 single-shot 才锁——一次对焦后保持，
+   治安卓「对焦会飘」；iOS/不支持设备无此项 → 静默跳过。曝光/白平衡锁定各机行为差异大、
+   无通用安全默认值，不泛化（RESEARCH §6 记录）。 */
+function lockCamParams(){
+  try {
+    const t = recv.stream && recv.stream.getVideoTracks()[0];
+    if (!t || !t.getCapabilities || !t.applyConstraints) return;
+    const c = t.getCapabilities();
+    if (c.focusMode && c.focusMode.indexOf('single-shot') >= 0) {
+      t.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(()=>{});
+    }
+  } catch (e) { /* 不支持/锁定失败均静默，不扰解码主路 */ }
+}
 function onDecodeDone(deep, text, pos){
   if (!recv.active) return;
   if (!deep) capLadder(recv, !!text);
   roiTrack(recv, deep, !!text, pos || null);
-  if (text) { recv.decoded++; flashReader(); handleFrame(text); }
+  if (text) {
+    recv.decoded++; flashReader(); handleFrame(text);
+    // #5a：首次命中时已对准且对焦收敛，此刻锁定最稳；失败与否不再重试（每次开扫重置标志）
+    if (!recv._camLocked) { recv._camLocked = true; lockCamParams(); }
+  }
 }
 /* Worker 内运行的主体（经 .toString() 注入，必须自包含）：
    先用 wasmBinary 离线初始化 ZXingWASM（免 fetch），随后每帧按 scales 顺序试解码、命中即回。 */
@@ -3515,17 +3613,21 @@ function flashReader(){
 /* 每秒统计：区分"光学解码不行"和"发送端没出新帧" */
 function startStats(){
   stopStats();
-  recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0;
+  recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0; recv.skipN = 0;
   recv.cap = 0; recv.failN = 0; recv.okN = 0;  // 分辨率阶梯复位：每次开扫从 640 档起步
   recv.roi = null;                             // ROI 跟踪复位：每次开扫从中央全扫起步（#9）
+  recv._gate = null; recv._gateSkips = 0;      // 换帧门控复位：签名与连跳计数清零（#10/#5b）
+  recv._camLocked = false;                     // 对焦锁定复位：下次开扫首次命中时重锁（#5a）
   $('scanStats').textContent = '诊断已启动，对准发送端屏幕…';
-  let lastS = 0, lastD = 0;
+  let lastS = 0, lastD = 0, lastK = 0;
   recv.statsT = setInterval(()=>{
-    const s = recv.scans - lastS, d = recv.decoded - lastD;
-    lastS = recv.scans; lastD = recv.decoded;
-    $('scanStats').textContent = '扫描 ' + s + '/s · 解码 ' + d + '/s · 拒收 ' + recv.rejected + ' · 重复 ' + recv.dup +
+    const s = recv.scans - lastS, d = recv.decoded - lastD, k = (recv.skipN || 0) - lastK;
+    lastS = recv.scans; lastD = recv.decoded; lastK = recv.skipN || 0;
+    $('scanStats').textContent = '扫描 ' + s + '/s · 解码 ' + d + '/s · 跳过 ' + k + '/s · 拒收 ' + recv.rejected + ' · 重复 ' + recv.dup +
       ' · 档位 ' + CAPS[recv.cap] + (recv.roi ? ' · ROI✓' : '') +
-      (d > 0 ? '（解码正常但进度不涨 = 发送端没出新帧）' : '（解码为 0：发送端点「全屏发射」，QR 对准中央虚线框）');
+      (d > 0 ? '（解码正常但进度不涨 = 发送端没出新帧）'
+        : (k > 0 ? '（跳过居多 = 画面未变：发送端暂停或未出新帧）'
+          : '（解码为 0：发送端点「全屏发射」，QR 对准中央虚线框）'));
   }, 1000);
 }
 function stopStats(){ if (recv.statsT) { clearInterval(recv.statsT); recv.statsT = null; } }
@@ -3591,9 +3693,11 @@ function resetAll(){
   stopAllScanning();             // 停摄像头/统计 rAF/熄屏锁/按钮文案
   recv.receiver = null;          // 喷泉状态（块/消元/清单）整体废弃
   recv.tid = ''; recv.manifestShown = false;
-  recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0;
+  recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0; recv.skipN = 0;
   recv.cap = 0; recv.failN = 0; recv.okN = 0;
   recv.roi = null;                 // ROI 跟踪一并废弃（#9）
+  recv._gate = null; recv._gateSkips = 0;   // 换帧门控一并废弃（#10/#5b）
+  recv._camLocked = false;                  // 对焦锁定标志复位（#5a）
   $('recvProg').classList.add('hidden');
   $('okCard').classList.add('hidden');
   $('progBar').style.width = '0%';

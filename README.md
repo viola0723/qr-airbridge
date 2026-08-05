@@ -21,6 +21,7 @@ QR-AirBridge moves files across an air gap over a one-way visual channel:
 - **Fountain coding**: no ACK channel needed; robust to frame loss; mid-stream join supported (manifest rides fountain block 0).
 - **Fast decode pipeline**: native BarcodeDetector (Shape Detection API) as tier 0 where available (Android Chrome / WebView 83+ / desktop Chromium), then zxing-wasm (ZXing-C++ compiled to WASM) in a Blob Web Worker, with graceful fallback tiers — main-thread WASM → zxing-js → jsQR — so it keeps working on iOS WebKit quirks.
 - **Adaptive optics**: receiver-side resolution ladder (640/960/1280) with hysteresis + multi-scale decode to survive screen moiré and high-density codes; after a hit, ROI tracking decodes only the code's neighborhood, slashing per-frame decode cost.
+- **Frame gate + sync beacon**: a 16×16 luminance signature skips unchanged captures (saving the ~1.7× redundant decode budget), and a black/white sync bar below the code's quiet zone lets the receiver drop camera frames exposed mid-transition — pushing the usable FPS knee up.
 - **Integrity**: per-frame CRC32, whole-file SHA-256, optional deflate.
 
 ### Measured throughput (real devices, 2026-08)
@@ -68,6 +69,8 @@ Fixed-length header, no separators. A seed-driven PRNG (LCG-16807) reproduces th
   不支持原生 API 的设备（iOS/Safari）静默落到 wasm 档，苹果 WebKit 拦 blob worker 的机型再落主线程档，速度仍在。
 - **自适应光学**：接收端分辨率阶梯（640/960/1280，连败升档/连胜降档）+ 多尺度轮换抗屏幕晶格混叠；
   命中后 ROI 跟踪只裁码邻域解码，单次解码成本大降（弱机更省电）。
+- **换帧门控 + 同步信标**：16×16 亮度签名跳过未变画面（省 ~1.7× 重复解码预算）；
+  码下静区外的黑白翻转信标条让接收端丢掉卡在换帧瞬间的曝光帧（混合帧），FPS 膝点上移。
 - **完整性**：帧级 CRC32 + 文件级 SHA-256 + 可选 deflate。
 
 ### 真机实测吞吐（2026-08，用户设备）
