@@ -19,7 +19,7 @@ QR-AirBridge moves files across an air gap over a one-way visual channel:
 
 - **Truly offline**: runs from `file://`, zero network access, single ~1.9 MB file.
 - **Fountain coding**: no ACK channel needed; robust to frame loss; mid-stream join supported (manifest rides fountain block 0).
-- **Fast decode pipeline**: native BarcodeDetector (Shape Detection API) as tier 0 where available (Android Chrome / WebView 83+ / desktop Chromium), then zxing-wasm (ZXing-C++ compiled to WASM) in a Blob Web Worker, with graceful fallback tiers — main-thread WASM → zxing-js → jsQR — so it keeps working on iOS WebKit quirks.
+- **Fast decode pipeline**: native BarcodeDetector (Shape Detection API) as tier 0 where available (Android Chrome / WebView 83+ / desktop Chromium), then zxing-wasm (ZXing-C++ compiled to WASM) in a **pool of 2 Blob Web Workers**, with graceful fallback tiers — main-thread WASM → zxing-js → jsQR — so it keeps working on iOS WebKit quirks.
 - **Adaptive optics**: receiver-side resolution ladder (640/960/1280) with hysteresis + multi-scale decode to survive screen moiré and high-density codes; after a hit, ROI tracking decodes only the code's neighborhood, slashing per-frame decode cost.
 - **Frame gate + sync beacon**: a 16×16 luminance signature skips unchanged captures (saving the ~1.7× redundant decode budget), and a black/white sync bar below the code's quiet zone lets the receiver drop camera frames exposed mid-transition — pushing the usable FPS knee up.
 - **Integrity**: per-frame CRC32, whole-file SHA-256, optional deflate.
@@ -65,7 +65,7 @@ Fixed-length header, no separators. A seed-driven PRNG (LCG-16807) reproduces th
 
 - **真离线**：`file://` 双击即用，零网络请求，单文件拷走就能跑。
 - **喷泉码**：无反向 ACK 也不怕丢帧；接收端可中途加入（清单块搭喷泉块 0 每 32 帧重发）。
-- **四档解码链**：BarcodeDetector 原生（安卓 Chrome / WebView 83+ / 桌面 Chromium，系统级检测）→ zxing-wasm（Worker，不卡 UI）→ 主线程 wasm → zxing-js/jsQR；
+- **四档解码链**：BarcodeDetector 原生（安卓 Chrome / WebView 83+ / 桌面 Chromium，系统级检测）→ zxing-wasm（**Worker 池 ×2**，不卡 UI）→ 主线程 wasm → zxing-js/jsQR；
   不支持原生 API 的设备（iOS/Safari）静默落到 wasm 档，苹果 WebKit 拦 blob worker 的机型再落主线程档，速度仍在。
 - **自适应光学**：接收端分辨率阶梯（640/960/1280，连败升档/连胜降档）+ 多尺度轮换抗屏幕晶格混叠；
   命中后 ROI 跟踪只裁码邻域解码，单次解码成本大降（弱机更省电）。

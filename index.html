@@ -179,7 +179,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.7.1 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.8.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3006,7 +3006,7 @@ function renderEnvCheck(){
   const okCam = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   let dec;
   if (bd.ready) dec = '原生✓';
-  else if (zxw.ready) dec = 'ZXing-wasm✓';
+  else if (zxw.ready) dec = 'ZXing-wasm✓×' + zxw.pool.filter(s => s.ready).length;  // 池化：显示就绪槽位数
   else if (zxw.mainReady) dec = 'ZXing-wasm✓(主线程' + (zxw.err ? ':' + zxw.err : '') + ')';
   else if (zxw.failed) {
     const why = (zxw.err + (zxw.mainErr ? '/主线程:' + zxw.mainErr : '')).slice(0, 30);
@@ -3017,7 +3017,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.7.1';
+    ' 解码器:' + dec + ' · v1.8.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3160,9 +3160,10 @@ async function toggleScan(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return alert('此浏览器不支持摄像头调用，请用系统浏览器打开（微信内请点右上角→在浏览器打开）');
   }
-  // 优先后置摄像头+高分辨率（扫高密度 QR 需要细节），但不用硬约束（部分安卓浏览器对 facingMode 支持不严，会直接失败）
+  // 优先后置摄像头+高分辨率+60fps（扫高密度 QR 需要细节；相机帧率 = 光学层纯净帧上限——30fps 经信标过滤后
+  // ~20/s 封顶，60fps 可到 ~40/s）。全部 ideal 软约束：给不了就回落、永不失败（部分安卓浏览器对硬约束支持不严，会直接失败）
   const tryConstraints = [
-    { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+    { video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } },
     { video: true }
   ];
   recv.starting = true;
@@ -3186,6 +3187,12 @@ function startVideo(stream){
   $('btnScan').textContent = '⏹ 停止';
   // 防止接收中屏幕自动息屏
   if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => { recv.wakeLock = w; }).catch(()=>{});
+  // 实际给到的相机帧率上屏（软约束结果因机而异，真机诊断口径）；读不到显示 '?'
+  try {
+    const tr = stream.getVideoTracks()[0];
+    const st = tr && tr.getSettings ? tr.getSettings() : null;
+    recv.camFps = st && st.frameRate ? Math.round(st.frameRate) : 0;
+  } catch (e) { recv.camFps = 0; }
   startStats();
   scanLoop();
 }
@@ -3202,8 +3209,9 @@ async function stopAllScanning(){
 function scanLoop(){
   if (!recv.active) return;
   const video = $('rv');
-  // 异步路径「忙则丢帧」：解码器未空就不采帧（pull 模型，扫描率≈解码吞吐，统计口径与同步链一致）
-  const decBusy = (bd.ready && bd.busy) || (zxw.ready && zxw.busy) || (zxw.mainReady && zxw.mainBusy);
+  // 异步路径「忙则丢帧」：解码器未空就不采帧（pull 模型，扫描率≈解码吞吐，统计口径与同步链一致）；
+  // wasm 池化 ×2 后「忙」= 无空闲槽位（poolFree 为 null），有一个空闲就继续采
+  const decBusy = (bd.ready && bd.busy) || (zxw.ready && !poolFree(zxw.pool)) || (zxw.mainReady && zxw.mainBusy);
   if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && !decBusy) {
     // 快慢双速 + 中央裁剪 + 分辨率阶梯 + ROI 跟踪（#9）：
     // - 快速通道（每帧）：只扫中央 75% 方形区并降到 ≤CAPS[档位]px（起步 640 档，连败升档，见 capLadder）。
@@ -3263,11 +3271,9 @@ function scanLoop(){
         });
       } else if (zxw.ready) {
         const img = scanCvCtx.getImageData(0, 0, dw, dh);
-        // wasm 异步路径（一级）：像素 transferable 零拷贝发给 worker，[原生,0.6×,0.45×] 多尺度在 worker 内一次试完；
+        // wasm 异步路径（一级，池化 ×2）：像素 transferable 零拷贝发给空闲槽位，[原生,0.6×,0.45×] 多尺度在 worker 内一次试完；
         // 解码成功/阶梯计数在 onWasmMsg 回填。发完即返回，主线程不被解码卡住（UI/取景不顿）
-        zxw.busy = true;
-        zxw.worker.postMessage({ buf: img.data.buffer, w: dw, h: dh, deep: deep, scales: deep ? [1] : CAP_SCALES },
-          [img.data.buffer]);
+        wasmDispatch(img, dw, dh, deep);
       } else if (zxw.mainReady) {
         const img = scanCvCtx.getImageData(0, 0, dw, dh);
         // wasm 主线程路径（二级降级：worker 不可用的设备，如部分苹果系统）：解码时短暂卡 UI，但仍快于 zxing-js
@@ -3444,38 +3450,59 @@ function bdDetectText(src){
     return { text: hit.rawValue, pos: b ? { x: b.x, y: b.y, w: b.width, h: b.height } : null };
   });
 }
-/* ===== zxing-wasm 解码管线（v1.3）· 三级降级链 =====
-   一级 worker-wasm：解码在 Blob Worker 里跑（ZXing-C++ WASM，比 zxing-js 快 3~10 倍），不卡主线程。
-   二级 主线程-wasm：worker 创建/初始化失败的设备（实测部分苹果系统）退回主线程跑 wasm，
-     解码时短暂卡 UI，但仍远快于 zxing-js。
+/* ===== zxing-wasm 解码管线（v1.3 worker 化 / v1.8.0 池化 ×2）· 三级降级链 =====
+   一级 worker-wasm 池：解码在 Blob Worker 里跑（ZXing-C++ WASM，比 zxing-js 快 3~10 倍），不卡主线程。
+     v1.8.0 起池化 ×2（ZXW_POOL）：两槽位并行，忙则丢帧的判据从「单 worker busy」变为「无空闲槽位」——
+     安卓解码算力瓶颈的直接手段（#8）；多帧在飞，视频→图像映射按槽位存（slot.map），防串帧。
+   二级 主线程-wasm：worker 创建/初始化失败的设备（实测部分苹果系统 file://）退回主线程跑 wasm，
+     解码时短暂卡 UI，但仍远快于 zxing-js；主线程无法开池（单线程），iPhone 吃池红利需 https 在线版。
    三级 同步兜底：zxing-js → jsQR（decodeQR），行为与 v1.2 一致。
    - Worker 源码 = 惰性块 zxwGlue（zxing-wasm IIFE）+ zxwWasm（base64 字节）+ 本文件纯函数源码
      （rescaleImg / posOfHit / zxwWorkerMain 经 .toString() 注入，避免两份维护；三者必须保持自包含、不引外部变量）。
    - 全程无 fetch：wasmBinary 直接喂字节（file:// 可用）；Worker 用 Blob URL 创建（file:// 可用）。
+   - 单槽位死亡（onerror/init fail）只降级不判死：池空才 failWasm；就绪超时同理（无一槽位就绪才判）。
    - 解码成功/阶梯计数统一在 onDecodeDone 回填；失败原因写入 zxw.err / zxw.mainErr 并显示在 envCheck。 */
-let zxw = { worker:null, ready:false, busy:false, failed:false, err:'',
+const ZXW_POOL = 2;   // worker 池大小（#8）：×2 是安卓多核收益与内存/预热成本的平衡点
+let zxw = { pool:[], ready:false, failed:false, err:'',
             mainReady:false, mainBusy:false, mainFailed:false, mainErr:'' };
 let ZXW_MAIN = null;  // 二级降级：主线程持有的 ZXingWASM 模块
 const ZXW_OPTS = { formats:['QRCode'], tryHarder:true, maxNumberOfSymbols:1 };  // worker 内 OPTS 的镜像（那边因自包含另写一份）
+/* 池里挑一个「已就绪且空闲」的槽位；没有 = 池满忙（调用方本帧丢弃，pull 模型语义不变）。独立小函数便于无头单测 */
+function poolFree(pool){
+  for (let i = 0; i < pool.length; i++) if (pool[i].ready && !pool[i].busy) return pool[i];
+  return null;
+}
 function initWasmDecoder(){
-  if (zxw.worker || zxw.ready || zxw.failed) return;
+  if (zxw.pool.length || zxw.ready || zxw.failed) return;
   try {
     const src = $('zxwGlue').textContent +
       '\n;var WASM_B64=' + JSON.stringify($('zxwWasm').textContent) + ';' +
       '\nvar rescaleImg=' + rescaleImg.toString() + ';' +
       '\nvar posOfHit=' + posOfHit.toString() + ';' +
       '\n(' + zxwWorkerMain.toString() + ')();';
-    zxw.worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
-    zxw.worker.onmessage = onWasmMsg;
-    zxw.worker.onerror = e => failWasm('worker报错:' + (e && e.message || ''));
-    // 就绪超时兜底：WASM 编译一般 <1s，8s 未就绪视为不可用
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    for (let i = 0; i < ZXW_POOL; i++) {
+      const slot = { w: new Worker(url), ready:false, busy:false, map:null };
+      slot.w.onmessage = ev => onWasmMsg(ev, slot);
+      slot.w.onerror = e => { console.debug('worker slot err:', e && e.message); killSlot(slot, 'worker报错:' + (e && e.message || '')); };
+      zxw.pool.push(slot);
+    }
+    // 就绪超时兜底：WASM 编译一般 <1s，8s 内无一槽位就绪视为不可用
     setTimeout(() => { if (!zxw.ready && !zxw.failed) failWasm('worker就绪超时'); }, 8000);
   } catch (e) { failWasm('worker创建异常:' + (e && e.message || e)); }
 }
+/* 单槽位死亡：摘除并 terminate；池空才判整个一级死亡（failWasm 自动补二级主线程） */
+function killSlot(slot, err){
+  try { slot.w.terminate(); } catch(e){}
+  const i = zxw.pool.indexOf(slot);
+  if (i >= 0) zxw.pool.splice(i, 1);
+  if (!zxw.pool.length) failWasm(err);
+}
 function failWasm(err){
   if (!zxw.failed) { zxw.failed = true; zxw.err = String(err || '未知').slice(0, 30); }
-  zxw.ready = false; zxw.busy = false;
-  if (zxw.worker) { try { zxw.worker.terminate(); } catch(e){} zxw.worker = null; }
+  zxw.ready = false;
+  zxw.pool.forEach(s => { try { s.w.terminate(); } catch(e){} });
+  zxw.pool = [];
   tryWasmMain();   // 一级挂了自动补二级：主线程跑 wasm
   renderEnvCheck();
 }
@@ -3495,12 +3522,24 @@ function tryWasmMain(){
       .catch(e => { zxw.mainFailed = true; zxw.mainErr = String(e && e.message || e).slice(0, 30); renderEnvCheck(); });
   } catch (e) { zxw.mainFailed = true; zxw.mainErr = String(e && e.message || e).slice(0, 30); renderEnvCheck(); }
 }
-function onWasmMsg(ev){
+/* wasm 池派发：取空闲槽位零拷贝发帧（buf transferable），本帧 视频→图像 映射存槽位——
+   池化后多帧在飞，recv._map 会被后续派发覆盖，结果回来时须用槽位存的那份（见 onWasmMsg）。
+   无空闲槽位返回 false（scanLoop 已按 poolFree 判忙，此处仅防御）。独立函数便于无头单测。 */
+function wasmDispatch(img, dw, dh, deep){
+  const slot = poolFree(zxw.pool);
+  if (!slot) return false;
+  slot.busy = true; slot.map = recv._map;
+  slot.w.postMessage({ buf: img.data.buffer, w: dw, h: dh, deep: deep, scales: deep ? [1] : CAP_SCALES },
+    [img.data.buffer]);
+  return true;
+}
+function onWasmMsg(ev, slot){
   const m = ev.data;
-  if (m.type === 'ready') { zxw.ready = true; renderEnvCheck(); return; }
-  if (m.type === 'fail') { failWasm('wasm初始化:' + (m.err || '')); return; }
+  if (m.type === 'ready') { slot.ready = true; zxw.ready = true; renderEnvCheck(); return; }
+  if (m.type === 'fail') { killSlot(slot, 'wasm初始化:' + (m.err || '')); return; }
   if (m.type !== 'frame') return;
-  zxw.busy = false;
+  slot.busy = false;
+  recv._map = slot.map;   // 多帧在飞：ROI 坐标换算用本帧槽位存的映射（onDecodeDone 同步读完）
   onDecodeDone(m.deep, m.text, m.pos);
 }
 /* 二级降级解码：主线程跑 wasm（readBarcodes 的 wasm 调用本身同步阻塞，await 仅是接口形态） */
@@ -3628,7 +3667,7 @@ function startStats(){
     const s = recv.scans - lastS, d = recv.decoded - lastD, k = (recv.skipN || 0) - lastK;
     lastS = recv.scans; lastD = recv.decoded; lastK = recv.skipN || 0;
     $('scanStats').textContent = '扫描 ' + s + '/s · 解码 ' + d + '/s · 跳过 ' + k + '/s · 拒收 ' + recv.rejected + ' · 重复 ' + recv.dup +
-      ' · 档位 ' + CAPS[recv.cap] + (recv.roi ? ' · ROI✓' : '') +
+      ' · 档位 ' + CAPS[recv.cap] + (recv.roi ? ' · ROI✓' : '') + ' · 相机 ' + (recv.camFps || '?') + 'fps' +
       (d > 0 ? '（解码正常但进度不涨 = 发送端没出新帧）'
         : (k > 0 ? '（跳过居多 = 画面未变：发送端暂停或未出新帧）'
           : '（解码为 0：发送端点「全屏发射」，QR 对准中央虚线框）'));
@@ -3708,6 +3747,7 @@ function resetAll(){
   recv.roi = null;                 // ROI 跟踪一并废弃（#9）
   recv._gate = null; recv._gateSkips = 0;   // 换帧门控一并废弃（#10/#5b）
   recv.t0 = 0;                              // 传输计时清零
+  recv.camFps = 0;                          // 相机帧率显示清零
   $('recvProg').classList.add('hidden');
   $('okCard').classList.add('hidden');
   $('progBar').style.width = '0%';

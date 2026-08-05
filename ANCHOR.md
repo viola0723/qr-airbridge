@@ -1,7 +1,7 @@
 # QR-AirBridge · 项目锚点
 
 > 给新会话的快速定位文件。技术调研与迭代路线见同目录 `RESEARCH.md`。
-> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；v1.5.0~v1.5.2 = #7 原生第零档（真机结论：用户双端不可用，功能保留给外部 GMS/桌面用户）；v1.6.0 = #9 ROI 跟踪；v1.7.0 = #10 换帧门控 + #5b 帧同步信标 + 默认档上移 30FPS/650B（真机复测：iPhone 无恙、安卓回退——#5a 对焦锁定证伪）；v1.7.1 = #5a 回退 + #9×#10 矩形冲突修复（ROI 裁剪 16px 网格对齐）+ 加载完成提示 + 传输耗时记录（**已真机复测**：iPhone 460KB/17s ≈24KB/s 光学层封顶、安卓 ≈10KB/s 解码仍受限）；**下一步 = #8 Worker 池（复测数据已触发预定开工条件，待用户拍板）**）
+> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；v1.5.0~v1.5.2 = #7 原生第零档（真机结论：用户双端不可用，功能保留给外部 GMS/桌面用户）；v1.6.0 = #9 ROI 跟踪；v1.7.0 = #10 门控 + #5b 信标 + 默认档上移（#5a 真机证伪）；v1.7.1 = #5a 回退 + #9×#10 网格对齐 + 测试辅助（复测：iPhone ≈24KB/s 光学封顶、安卓 ≈10KB/s 解码受限）；**v1.8.0 = #8 Worker 池 ×2 + 相机 60fps 软约束 + 实际帧率上屏（无头 41 断言 + Chrome CDP 双槽位真就绪实测，待真机复测）**；下一步 = 真机复测 v1.8.0 → decode 侧收官，重心转编码/发射端）
 
 ## 这是什么
 
@@ -117,8 +117,8 @@ wasm 链仍是主力，#9/#8/#10 方向确认；原生档保留给外部 GMS 安
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
 - 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
   **GitHub Pages 在线版已开通**：<https://viola0723.github.io/qr-airbridge/>（push 后自动重建，1~3 分钟生效）——https 环境是手机端最佳姿势（摄像头安全上下文 + iPhone worker 档解锁），推荐日常使用。
-- 当前基线：`backups/index-v1.7.1-20260805.html`（#5a 回退 + ROI 网格对齐 + 加载提示 + 传输耗时）。改崩了直接拷回覆盖。
-- 历史基线：`index-v1.7.0-20260805.html`（#10 门控 + #5b 信标 + 默认档 30/650；#5a 对焦锁定真机证伪）、`index-v1.6.0-20260805.html`（#9 ROI 跟踪）、`index-v1.5.2-20260805.html`（#7 原生第零档 + 显示收敛 + UI 修复两项）、`index-v1.5.1-20260805.html`（#7 探测可诊断）、`index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）、`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
+- 当前基线：`backups/index-v1.8.0-20260805.html`（#8 worker 池 ×2 + 60fps 软约束 + 帧率上屏）。改崩了直接拷回覆盖。
+- 历史基线：`index-v1.7.1-20260805.html`（#5a 回退 + ROI 网格对齐 + 加载提示 + 传输耗时）、`index-v1.7.0-20260805.html`（#10 门控 + #5b 信标 + 默认档 30/650；#5a 对焦锁定真机证伪）、`index-v1.6.0-20260805.html`（#9 ROI 跟踪）、`index-v1.5.2-20260805.html`（#7 原生第零档 + 显示收敛 + UI 修复两项）、`index-v1.5.1-20260805.html`（#7 探测可诊断）、`index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）、`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
 ## index.html 结构地图（行号会漂移，以区段注释为准）
 
@@ -132,7 +132,7 @@ wasm 链仍是主力，#9/#8/#10 方向确认；原生档保留给外部 GMS 安
 | zxing-js (Apache-2.0) | 2497–2499 | 降级链主解码器（HybridBinarizer 局部自适应二值化） |
 | zxing-wasm reader (MIT) | 2502–2503 | `text/plain` 惰性块（不执行）：IIFE glue + WASM base64，作 Blob Worker 源码/字节仓 |
 | AirBridge 引擎 | 2504–2971 | CRC32 / SHA-256 / base45 / deflate / Soliton / Fountain / Sender / Receiver / Store |
-| 应用层 | 2973–末尾 | 全局状态、微信引导、加载完成提示（bootMsg）、发送端（drawQR 含 #5b 信标条渲染）、接收端、bd 第零档 + wasm worker 管线、#9 ROI 跟踪（roiTrack/posOfHit/roiSnapRect 网格对齐）、**#10/#5b 门控（gateSkip/sigSame/gateJudge/beaconJudge）**、帧处理（含传输耗时 recv.t0→finalizeRecv）、Tab 切换 |
+| 应用层 | 2973–末尾 | 全局状态、微信引导、加载完成提示（bootMsg）、发送端（drawQR 含 #5b 信标条渲染）、接收端、bd 第零档 + wasm **worker 池 ×2**（poolFree/wasmDispatch/killSlot，映射按槽位存）、#9 ROI 跟踪（roiTrack/posOfHit/roiSnapRect 网格对齐）、**#10/#5b 门控（gateSkip/sigSame/gateJudge/beaconJudge）**、帧处理（含传输耗时 recv.t0→finalizeRecv）、Tab 切换 |
 
 ## 线协议（v2 帧格式 + v1.1 度分布/种子语义，v1.2/v1.3 未动协议、v1.1+ 可混发收；v0.9/v1.0/v1.1 两两互不兼容，同文件收发同步升级）
 
@@ -357,6 +357,31 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
 - **真机复测已完成**（2026-08-05，见「真机实测数据」）：iPhone 460KB/17s ≈24KB/s（光学层封顶，膝点实质抬过 24）、
   安卓 ≈10KB/s（对焦恢复、dup 大降，解码算力仍受限 → 触发 #8 预定开工条件）、两个辅助功能双端确认可用。
 
+**v1.8.0 = #8 Worker 池 ×2 + 相机 60fps 软约束 + 实际帧率上屏（2026-08-05，v1.7.1 复测数据触发，用户拍板）**
+- **#8 Worker 池 ×2（decode 侧收官项）**：单 worker → 双槽位池（`ZXW_POOL = 2`，`zxw.pool[]`）。
+  「忙则丢帧」判据从「单 worker busy」变为「无空闲槽位」（`poolFree`）；派发独立成 `wasmDispatch`。
+  **多帧在飞的串帧风险对策**：视频→图像映射改按槽位存（派发时 `slot.map = recv._map`，回填时
+  `recv._map = slot.map` 再进 onDecodeDone）——harness 乱序测试（A 先发 B 后发、B 先回）证实各用各的映射。
+  降级语义：单槽位死亡（onerror/init fail）只摘除不判死，**池空才 failWasm** 落二级主线程；就绪超时同理
+  （8s 无一槽位就绪才判）。envCheck 显示就绪槽位数（`ZXing-wasm✓×2`）。
+  预期：安卓 ~10 → ~20/s（v1.7.1 复测确认 ROI+门控后仍解码受限）；iPhone 配合 60fps 供给 ~30~40/s 时可消化
+  （仅 https 在线版——file:// 下 WebKit 拦 blob worker 走主线程档，单线程无法开池）。
+- **相机 60fps 软约束**：`tryConstraints` 首选加 `frameRate: { ideal: 60 }`——软约束给不了就回落、永不失败。
+  依据：v1.7.1 复测显示 iPhone 限制已上移到光学层（相机 30fps × 信标过滤后纯净帧 ~20/s ≈ 24KB/s 封顶）；
+  60fps 把纯净帧上限抬到 ~40/s。安卓在池落地前吃不到（解码受限），池之后同样受益。
+- **实际帧率上屏**：startVideo 读 `track.getSettings().frameRate`（软约束结果因机而异），统计行加
+  「相机 Xfps」；resetAll 清零。真机诊断口径：顺带给出「这台设备到底暴露多少帧率」的答案（120fps 硬件
+  普遍但 Web 层主流封顶 60，实测后再定要不要抬 ideal）。
+- 版本号 v1.8.0（envCheck + footer，新能力 minor）；线协议不动，与 v1.1~v1.7.1 可混发收。
+- 验证：语法 5 段 `node --check` OK；node mock-worker harness **41 断言全绿**（poolFree 5 / wasmDispatch 6
+  含负载与零拷贝 / onWasmMsg ready、**乱序回填不串映射**、fail 降级到 failWasm 全链 / failWasm 复位 +
+  静态断言 14，harness `_v180_check.js` 用后已删）；**Chrome CDP 真实加载实测**（headless Chromium，
+  真实时间轮询页面内状态）：双槽位 wasm 真编译真就绪（pool [{r:true},{r:true}]）、envCheck `ZXing-wasm✓×2`、
+  bootMsg 翻转、footer v1.8.0（harness `_v180_cdp.js` 用后已删）。本机无 Electron 真回环——
+  解码器本体（zxwWorkerMain）零改动，池簿记由 41 断言 + CDP 双就绪覆盖。
+- **待真机复测**：安卓解码率是否 ~20/s（对照 v1.7.1 的 ~10/s，同文件同档位）、iPhone 60fps 是否给到
+  （统计行「相机 Xfps」读数）及落在 35~50KB/s 区间、双 worker 长时间传输的发热降频、两端 dup 保持低位。
+
 ## 已知遗留
 
 - 引擎里有 IndexedDB 断点续传 `Store`，但接收流程未接入（仅在接收完成时 `remove`）。
@@ -365,6 +390,8 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
 - Soliton c/δ 参数留待 §8 #4 按真实信道丢帧率调优（当前 c=0.1, δ=0.5）。
 - **信标假设手机竖屏正对**（v1.7.0）：横转 90° 时码下采样带落偏，连跳被逃逸阀强制放行、退化为无信标行为，
   不死锁但吃不到混合帧过滤；方向自适应（用 wasm 四角 position 判旋转）留作后续。
+- **iPhone 池化红利仅 https 在线版**（v1.8.0）：file:// 下 WebKit 拦 blob worker 走主线程 wasm 档，单线程无法开池；
+  60fps 软约束不受此限（摄像头约束与 worker 管线无关）。
 - Chrome 截图相对路径会写失败，需用 Windows 绝对路径（`--screenshot="C:\\..."`）。
 
 ## 无头验证方法（本会话验证过，可复用）
@@ -390,7 +417,7 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   「允许远程自动化」，未开不可用。harness 在 `/tmp/eleshot`（main.js 通用：`<html> <png> [pre.js] [result.json]`）。
 - Chrome 路径：`C:/Program Files/Google/Chrome/Application/chrome.exe`。
 
-## 下一步（#8 Worker 池：v1.7.1 复测数据已触发预定开工条件，待用户拍板）
+## 下一步（真机复测 v1.8.0；decode 侧收官，之后重心转编码/发射端）
 
 ### ① 接收端分辨率阶梯 —— ✅ v1.2 已落地（真机复测完成）
 
@@ -402,15 +429,16 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
 - 改法与验收记录见「本轮已完成的改动」v1.3 节；复测数据见「真机实测数据」v1.3 节。
 - 结论：900B@24FPS 解码 ~10/s（v1.2 同期个位数/s），解码瓶颈解除，用户判定可用。
 
-### ③ decode 侧 #7~#10 / #5 光学 —— 仅剩 #8
+### ③ decode 侧 #7~#10 / #5 光学 —— ✅ 全部落地（v1.8.0 待真机复测）
 
 - **#7 BarcodeDetector 原生第零档 —— ✅ v1.5.0~v1.5.2 已发布**（真机结论：用户双端不可用，功能保留给外部 GMS/桌面用户）。
 - **#9 ROI 跟踪 —— ✅ v1.6.0 已落地并验收**。改法与验证见「本轮已完成的改动」v1.6.0 节。
 - **#10 换帧门控 + #5b 帧同步信标 —— ✅ v1.7.0 落地、v1.7.1 修正并真机复测通过**：
   iPhone 50FPS 供给下有效新帧 ~20/s 全解出（膝点实质抬过 24，iPhone 限制上移光学层）；
   安卓跳过构成正常、dup 显著下降（网格对齐见效）、对焦恢复（#5a 回退）。
-- **#8 Worker 池 ×2**：decode 侧最后一项。**v1.7.1 复测确认安卓 ROI+门控后仍 ~10/s 解码受限 → 预定开工条件已触发，待用户拍板**。
-  目标：安卓 ~10 → ~20/s（≈20 KB/s）；iPhone 无收益（已在光学层 ~20/s 纯净帧封顶，且仅 https worker 档才能开池）。
+- **#8 Worker 池 ×2 —— ✅ v1.8.0 已落地（decode 侧收官项），待真机复测**。同版：相机 60fps 软约束 + 实际帧率上屏。
+  复测看点：安卓解码率 ~20/s 达成度（对照 v1.7.1 ~10/s，同文件同档位）；iPhone「相机 Xfps」读数（60 是否给到）与
+  35~50KB/s 落点；双 worker 长时间传输的发热降频；两端 dup 保持低位。
 
 ### 远期（知道即可）
 
