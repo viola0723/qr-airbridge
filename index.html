@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.5.1 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.5.2 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3008,11 +3008,11 @@ function renderEnvCheck(){
     dec = (typeof ZXing !== 'undefined' ? 'ZXing✓' : 'jsQR') + '(wasm降级' + (why ? ':' + why : '') + ')';
   }
   else dec = typeof ZXing !== 'undefined' ? 'ZXing✓' : (typeof jsQR !== 'undefined' ? 'jsQR(降级)' : '✗');
-  if (!bd.ready && (bd.failed || bd.skip)) dec += '(原生✗' + (bd.skip ? ':' + bd.skip : '') + ')';
+  if (bd.failed && !bd.ready) dec += '(原生✗)';  // 仅运行期降级上屏；skip 原因（无API/无qr_code/超时/异常）留 bd.skip/console 备查
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.5.1';
+    ' 解码器:' + dec + ' · v1.5.2';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3279,8 +3279,8 @@ function capLadder(r, ok){
    探测两步：'BarcodeDetector' in window + getSupportedFormats() 含 qr_code
    （部分平台构造函数在但无 QR 后端；iOS/桌面 Safari 不支持 → 静默跳过，落回 wasm 三级链）。
    探测加 3s 超时：部分设备 formats 查询挂起（后端模块加载不来），不能永远等；
-   跳过原因记入 bd.skip 并显示在 envCheck（无API/无qr_code/探测超时/异常），便于真机回报定位。
-   detect 连续 3 次异常 = 探测通过但服务半坏，退回 wasm 链（bd.failed）。
+   跳过原因记入 bd.skip/console（无API/无qr_code/探测超时/异常）备查，不上屏——属设备固有限制、用户不可行动；
+   仅运行期 detect 连续 3 次异常降级（bd.failed）在 envCheck 标（原生✗)。
    结果 rawValue 为字符串，v2 帧纯 alphanumeric 正好够用。 */
 let bd = { det:null, ready:false, busy:false, failed:false, errN:0, skip:'' };
 async function initBarcodeDetector(){
