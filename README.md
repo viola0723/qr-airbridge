@@ -19,7 +19,7 @@ QR-AirBridge moves files across an air gap over a one-way visual channel:
 
 - **Truly offline**: runs from `file://`, zero network access, single ~1.9 MB file.
 - **Fountain coding**: no ACK channel needed; robust to frame loss; mid-stream join supported (manifest rides fountain block 0).
-- **Fast decode pipeline**: zxing-wasm (ZXing-C++ compiled to WASM) in a Blob Web Worker, with graceful fallback tiers — main-thread WASM → zxing-js → jsQR — so it keeps working on iOS WebKit quirks.
+- **Fast decode pipeline**: native BarcodeDetector (Shape Detection API) as tier 0 where available (Android Chrome / WebView 83+ / desktop Chromium), then zxing-wasm (ZXing-C++ compiled to WASM) in a Blob Web Worker, with graceful fallback tiers — main-thread WASM → zxing-js → jsQR — so it keeps working on iOS WebKit quirks.
 - **Adaptive optics**: receiver-side resolution ladder (640/960/1280) with hysteresis + multi-scale decode to survive screen moiré and high-density codes.
 - **Integrity**: per-frame CRC32, whole-file SHA-256, optional deflate.
 
@@ -64,8 +64,8 @@ Fixed-length header, no separators. A seed-driven PRNG (LCG-16807) reproduces th
 
 - **真离线**：`file://` 双击即用，零网络请求，单文件拷走就能跑。
 - **喷泉码**：无反向 ACK 也不怕丢帧；接收端可中途加入（清单块搭喷泉块 0 每 32 帧重发）。
-- **三级解码链**：zxing-wasm（Worker，不卡 UI）→ 主线程 wasm → zxing-js → jsQR，
-  苹果 WebKit 拦 blob worker 的机型自动落到主线程档，速度仍在。
+- **四档解码链**：BarcodeDetector 原生（安卓 Chrome / WebView 83+ / 桌面 Chromium，系统级检测）→ zxing-wasm（Worker，不卡 UI）→ 主线程 wasm → zxing-js/jsQR；
+  不支持原生 API 的设备（iOS/Safari）静默落到 wasm 档，苹果 WebKit 拦 blob worker 的机型再落主线程档，速度仍在。
 - **自适应光学**：接收端分辨率阶梯（640/960/1280，连败升档/连胜降档）+ 多尺度轮换抗屏幕晶格混叠。
 - **完整性**：帧级 CRC32 + 文件级 SHA-256 + 可选 deflate。
 

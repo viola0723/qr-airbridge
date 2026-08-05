@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.4.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.5.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3000,17 +3000,19 @@ function wechatGuard() {
 function renderEnvCheck(){
   const okCam = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   let dec;
-  if (zxw.ready) dec = 'ZXing-wasm✓';
+  if (bd.ready) dec = '原生✓';
+  else if (zxw.ready) dec = 'ZXing-wasm✓';
   else if (zxw.mainReady) dec = 'ZXing-wasm✓(主线程' + (zxw.err ? ':' + zxw.err : '') + ')';
   else if (zxw.failed) {
     const why = (zxw.err + (zxw.mainErr ? '/主线程:' + zxw.mainErr : '')).slice(0, 30);
     dec = (typeof ZXing !== 'undefined' ? 'ZXing✓' : 'jsQR') + '(wasm降级' + (why ? ':' + why : '') + ')';
   }
   else dec = typeof ZXing !== 'undefined' ? 'ZXing✓' : (typeof jsQR !== 'undefined' ? 'jsQR(降级)' : '✗');
+  if (bd.failed && !bd.ready) dec += '(原生✗)';
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.4.0';
+    ' 解码器:' + dec + ' · v1.5.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3018,6 +3020,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 刷新后恢复之前的 tab（接收页重置=刷新页面，需回到接收页）
   try { if (sessionStorage.getItem('ab_tab') === 'recv') switchTab('recv'); } catch(e){}
   renderEnvCheck();
+  initBarcodeDetector();  // 第零档探测：安卓 Chrome 原生 QR（支持即最优先）；不支持静默跳过
   initWasmDecoder();  // 后台预热 wasm worker，开扫时即就绪；失败自动降级同步链
 });
 
@@ -3127,6 +3130,7 @@ function resetSend(){
   $('fileBox').classList.remove('has-file');
   $('fileName').textContent = '';
   $('inputText').value = '';
+  $('compressBadge').textContent = '自动';  // 复位压缩徽标（发送中会改成 已压缩/未压缩，属本次任务状态）
   $('btnStart').disabled = false;
   $('sendPanel').classList.add('hidden');
   $('fsOverlay').classList.add('hidden');  // 重置时退出全屏发射
@@ -3184,9 +3188,9 @@ async function stopAllScanning(){
 function scanLoop(){
   if (!recv.active) return;
   const video = $('rv');
-  // wasm 异步路径「忙则丢帧」：解码器未空就不采帧（pull 模型，扫描率≈解码吞吐，统计口径与同步链一致）
-  const wasmBusy = (zxw.ready && zxw.busy) || (zxw.mainReady && zxw.mainBusy);
-  if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && !wasmBusy) {
+  // 异步路径「忙则丢帧」：解码器未空就不采帧（pull 模型，扫描率≈解码吞吐，统计口径与同步链一致）
+  const decBusy = (bd.ready && bd.busy) || (zxw.ready && zxw.busy) || (zxw.mainReady && zxw.mainBusy);
+  if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && !decBusy) {
     // 快慢双速 + 中央裁剪 + 分辨率阶梯：
     // - 快速通道（每帧）：只扫中央 75% 方形区并降到 ≤CAPS[档位]px（起步 640 档，连败升档，见 capLadder）。
     //   竖屏 1080x1920 全帧扫描有 200 万像素，手机解码一帧约 500ms（实测仅 ~2 次/s），
@@ -3210,19 +3214,35 @@ function scanLoop(){
     scanCv.width = dw; scanCv.height = dh;
     scanCvCtx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     try {
-      const img = scanCvCtx.getImageData(0, 0, dw, dh);
       recv.scans++;
-      if (zxw.ready) {
+      if (bd.ready) {
+        // 原生第零档（BarcodeDetector）：detect 走系统检测服务不卡主线程，直接吃 canvas，
+        // 省 getImageData 一次全帧拷贝；多尺度由检测器内部处理，无需 CAP_SCALES 轮换
+        bd.busy = true;
+        bdDetectText(scanCv).then(text => {
+          bd.busy = false; bd.errN = 0;
+          onDecodeDone(deep, text);
+        }).catch(e => {
+          bd.busy = false;
+          console.debug('bd detect err:', e && e.message);
+          // 连续异常 = 探测通过但服务半坏：退回 wasm 链
+          if (++bd.errN >= 3) { bd.ready = false; bd.failed = true; renderEnvCheck(); }
+          onDecodeDone(deep, null);
+        });
+      } else if (zxw.ready) {
+        const img = scanCvCtx.getImageData(0, 0, dw, dh);
         // wasm 异步路径（一级）：像素 transferable 零拷贝发给 worker，[原生,0.6×,0.45×] 多尺度在 worker 内一次试完；
         // 解码成功/阶梯计数在 onWasmMsg 回填。发完即返回，主线程不被解码卡住（UI/取景不顿）
         zxw.busy = true;
         zxw.worker.postMessage({ buf: img.data.buffer, w: dw, h: dh, deep: deep, scales: deep ? [1] : CAP_SCALES },
           [img.data.buffer]);
       } else if (zxw.mainReady) {
+        const img = scanCvCtx.getImageData(0, 0, dw, dh);
         // wasm 主线程路径（二级降级：worker 不可用的设备，如部分苹果系统）：解码时短暂卡 UI，但仍快于 zxing-js
         zxw.mainBusy = true;
         decodeViaWasmMain(img, dw, dh, deep);
       } else {
+        const img = scanCvCtx.getImageData(0, 0, dw, dh);
         // 同步兜底链（zxing-js → jsQR）：多尺度轮换——高像素传感器拍到屏幕晶格产生混叠，
         // 模块像素间距不同则命中率不同，任何单一尺度都有死区；按档位的比例轮换保留抗混叠并集
         const f = deep ? 1 : CAP_SCALES[recv.scans % CAP_SCALES.length];
@@ -3253,6 +3273,31 @@ function capLadder(r, ok){
     r.failN++; r.okN = 0;
     if (r.failN >= 12 && r.cap < CAPS.length - 1) { r.cap++; r.failN = 0; }
   }
+}
+/* ===== BarcodeDetector 原生第零档（RESEARCH §8 #7）=====
+   安卓 Chrome 的 Shape Detection API：QR 检测走系统/硬件服务，比 wasm 快一个量级。
+   探测两步：'BarcodeDetector' in window + getSupportedFormats() 含 qr_code
+   （部分平台构造函数在但无 QR 后端；iOS/桌面 Safari 不支持 → 静默跳过，落回 wasm 三级链）。
+   detect 连续 3 次异常 = 探测通过但服务半坏，退回 wasm 链并记入 envCheck。
+   结果 rawValue 为字符串，v2 帧纯 alphanumeric 正好够用。 */
+let bd = { det:null, ready:false, busy:false, failed:false, errN:0 };
+async function initBarcodeDetector(){
+  try {
+    if (!('BarcodeDetector' in window)) return;
+    const fmts = await BarcodeDetector.getSupportedFormats();
+    if (fmts && fmts.indexOf('qr_code') >= 0) {
+      bd.det = new BarcodeDetector({ formats: ['qr_code'] });
+      bd.ready = true;
+      renderEnvCheck();
+    }
+  } catch (e) { console.debug('BarcodeDetector 探测失败:', e && e.message); }
+}
+/* 单帧检测：独立小函数便于无头单测；resolve text|null，reject 由调用方计数降级 */
+function bdDetectText(src){
+  return bd.det.detect(src).then(rs => {
+    const hit = rs && rs.find(x => x && x.rawValue);
+    return hit ? hit.rawValue : null;
+  });
 }
 /* ===== zxing-wasm 解码管线（v1.3）· 三级降级链 =====
    一级 worker-wasm：解码在 Blob Worker 里跑（ZXing-C++ WASM，比 zxing-js 快 3~10 倍），不卡主线程。
@@ -3328,7 +3373,7 @@ async function decodeViaWasmMain(img, dw, dh, deep){
   zxw.mainBusy = false;
   onDecodeDone(deep, text);
 }
-/* 解码回填（三条链共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道 */
+/* 解码回填（bd/wasm 四条路径共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道 */
 function onDecodeDone(deep, text){
   if (!recv.active) return;
   if (!deep) capLadder(recv, !!text);
@@ -3481,7 +3526,24 @@ async function finalizeRecv(){
   };
   if (recv.receiver && recv.receiver.tid) AB.Store.remove(recv.receiver.tid);
 }
-function resetAll(){ location.reload(); }
+/* 重置接收端（原地复位，不再整页刷新）：刷新要重载 ~1.9MB 页面并重编译 WASM、丢掉已预热的解码器，
+   弱网（Pages https）与慢机上都是浪费；接收状态全部收在 recv 与 recv.receiver 两处，原地清理即等价复位。
+   引擎对新 TID 本就有自动重置（先验 CRC 再认任务），此按钮面向「中途换任务/重扫」的人工场景。 */
+function resetAll(){
+  stopAllScanning();             // 停摄像头/统计 rAF/熄屏锁/按钮文案
+  recv.receiver = null;          // 喷泉状态（块/消元/清单）整体废弃
+  recv.tid = ''; recv.manifestShown = false;
+  recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0;
+  recv.cap = 0; recv.failN = 0; recv.okN = 0;
+  $('recvProg').classList.add('hidden');
+  $('okCard').classList.add('hidden');
+  $('progBar').style.width = '0%';
+  $('recvPct').textContent = '0%';
+  $('recvSolved').textContent = '0'; $('recvTotal').textContent = '0';
+  $('recvFname').textContent = '-';
+  $('recvShaBadge').textContent = 'SHA -';
+  $('scanStats').textContent = '';
+}
 
 /* ============ 接收帧处理（自动初始化 receiver + 显示任务元数据） ============ */
 function handleFrame(raw){
@@ -3521,7 +3583,8 @@ function switchTab(t){
   $('tabSend').classList.toggle('on', t==='send');
   $('tabRecv').classList.toggle('on', t==='recv');
   if (t!=='recv' && recv.active) stopAllScanning();
-  // 记住当前 tab：接收页「重置所有状态」是整页刷新，刷新后要回到接收页
+  // 记住当前 tab：用户手动刷新页面（或浏览器回收后台页）后能回到接收页；
+  // 「重置所有状态」自本轮起改为原地复位，不再依赖此 hack
   try { sessionStorage.setItem('ab_tab', t); } catch(e){}
 }
 </script>

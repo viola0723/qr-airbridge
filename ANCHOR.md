@@ -1,7 +1,7 @@
 # QR-AirBridge · 项目锚点
 
 > 给新会话的快速定位文件。技术调研与迭代路线见同目录 `RESEARCH.md`。
-> 最后更新：2026-08-04（①②已落地并真机复测通过；v1.3.1 补苹果二级降级、v1.3.2 滑块上限 FPS 30/单帧 1200、v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；下一步 = decode 侧 #7~#10（安卓优先）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
+> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；**v1.5.0 已发布：#7 BarcodeDetector 原生第零档 + UI 修复两项，待安卓真机复测**；下一步 = v1.5.0 真机复测 → decode 侧 #9→#8→#10（安卓）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
 
 ## 这是什么
 
@@ -79,8 +79,8 @@
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
 - 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
   **GitHub Pages 在线版已开通**：<https://viola0723.github.io/qr-airbridge/>（push 后自动重建，1~3 分钟生效）——https 环境是手机端最佳姿势（摄像头安全上下文 + iPhone worker 档解锁），推荐日常使用。
-- 当前基线：`backups/index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）。改崩了直接拷回覆盖。
-- 历史基线：`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
+- 当前基线：`backups/index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）。改崩了直接拷回覆盖。
+- 历史基线：`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
 ## index.html 结构地图（行号会漂移，以区段注释为准）
 
@@ -94,7 +94,7 @@
 | zxing-js (Apache-2.0) | 2497–2499 | 降级链主解码器（HybridBinarizer 局部自适应二值化） |
 | zxing-wasm reader (MIT) | 2502–2503 | `text/plain` 惰性块（不执行）：IIFE glue + WASM base64，作 Blob Worker 源码/字节仓 |
 | AirBridge 引擎 | 2504–2971 | CRC32 / SHA-256 / base45 / deflate / Soliton / Fountain / Sender / Receiver / Store |
-| 应用层 | 2973–末尾 | 全局状态、微信引导、发送端、接收端、wasm worker 管线、帧处理、Tab 切换 |
+| 应用层 | 2973–末尾 | 全局状态、微信引导、发送端、接收端、bd 第零档 + wasm worker 管线、帧处理、Tab 切换 |
 
 ## 线协议（v2 帧格式 + v1.1 度分布/种子语义，v1.2/v1.3 未动协议、v1.1+ 可混发收；v0.9/v1.0/v1.1 两两互不兼容，同文件收发同步升级）
 
@@ -205,6 +205,35 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   帧长 1974 全 alphanumeric + QR-M v30/137 模块可容纳 + 450B 默认回归字节一致）；app 块 `node --check` OK。
   **真机复测已完成**（2026-08-04，见「真机实测数据」）：提示音/震动双端正常；拉满档 iPhone ~30/s、安卓 ~10/s。
 
+**v1.5.0 = #7 BarcodeDetector 原生第零档 + UI 修复两项（2026-08-05 发布，push 即上线）**
+
+**#7 BarcodeDetector 原生第零档（2026-08-05）**
+- 探测两步：`'BarcodeDetector' in window` + `getSupportedFormats()` 含 `qr_code`（部分平台构造函数在但无 QR 后端）。
+  就绪即最优先：detect 走系统/硬件检测服务不卡主线程，直接吃 `scanCv` canvas（省 getImageData 一次全帧拷贝），
+  多尺度由检测器内部处理（不再轮换 CAP_SCALES）；忙则丢帧/pull 模型、onDecodeDone 回填口径与 wasm 路径一致。
+- 降级：不支持（iOS/桌面 Safari 未原生支持，WebKit 仅旗标实验）探测静默跳过；detect 连续 3 次异常判半坏退回
+  wasm 链（`bd.failed`，envCheck 标「原生✗」）。支持面：安卓 Chrome、Android WebView 83+、Edge、桌面 Chrome（macOS/Windows/ChromeOS）。
+- 改动点：scanLoop 派发加 bd 分支（getImageData 下沉到各 wasm/同步分支内）、busy 门加 bd 位、
+  `initBarcodeDetector`/`bdDetectText` 新函数、envCheck 第零档显示；引擎与线协议未动。
+- 无头验证：app 块 `node --check` OK；node 接线 harness **15 断言全绿**（mock BD/Worker/DOM 边界 + 真引擎喷泉回环）：
+  探测 → envCheck 原生✓ → 忙则丢帧（挂起期间 rAF 不再采帧）→ bd 独占 52 帧完成 20KB 字节一致、wasm 零调用 →
+  连续 3 次异常降级 → wasm 二级接管完成字节一致 → 无 BD 环境 wasm 链独立字节一致（harness 用后已删）。
+  **真 BarcodeDetector QR 真回环已验**（2026-08-05，Electron Chromium 148 / macOS Vision 后端：
+  20KB L=47，50/50 帧全解码 miss=0，assemble 字节逐位一致；方法见「无头验证方法」末节）。
+  剩余未验 = 安卓硬件解码速率与摄像头光学路径，留待安卓真机复测（对比 wasm worker 档 ~10/s 基线）。
+- 备注：README 解码链描述已随发布同步为「原生第零档 + wasm 三级链」（中英文两节）。
+
+**UI 修复两项（2026-08-05，Electron 截图复验）**
+- **压缩徽标残留（bug）**：`resetSend` 未复位 `compressBadge`（在卡片2 checkbox 旁，sendPanel 之外），
+  重置后界面仍显示上次任务的「已压缩 x→y」——已修为复位「自动」，截图前后对照确认。
+- **接收端「重置所有状态」整页刷新 → 原地复位**：原为 `location.reload()`，弱网（Pages https）要重载
+  ~1.9MB 页面 + 重编译 WASM + 丢掉解码器预热；接收状态本就收在 `recv`/`recv.receiver` 两处，原地清理即等价。
+  现行为：停扫描 + 弃喷泉状态 + 计数/阶梯/进度卡/完成卡/统计行清零，页面不刷新（`window` 标记存活证实无 reload）。
+  附带行为变化：旧 reload 会连带清空发送端状态，新 resetAll 只管接收端（发送端有自己的「重置状态」按钮）。
+  tab 记忆 hack 保留（应对手动刷新/后台回收），switchTab 注释已同步。
+- 验证：app 块 `node --check` OK；Electron 运行时断言全过（徽标回「自动」；resetAll 后 receiver=null /
+  TID 清空 / 计数清零 / 双卡隐藏 / 扫描按钮文案复原）；两tab 界面截图无破版。
+
 ## 已知遗留
 
 - 引擎里有 IndexedDB 断点续传 `Store`，但接收流程未接入（仅在接收完成时 `remove`）。
@@ -227,9 +256,15 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   `Page.navigate` 后每 500ms `Runtime.evaluate` 轮询 `#testResult`（本轮 harness `_zw/cdp_run.js` 用后已删，要点即此）。
 - 界面截图：`chrome --headless=new --window-size=600,1500 --screenshot=out.png "file:///.../index.html"`；
   截图用 ReadMediaFile 回看一眼再下结论；临时副本与截图用完删除。
+- **本机无 Chrome 时的截图/JS 驱动（2026-08-05 起，macOS）**：在 /tmp 下 `npm install electron`（勿入仓），
+  offscreen BrowserWindow + `executeJavaScript` 可驱动页面内任意函数并回读 JSON，`capturePage` 出 PNG。
+  要点：① 本机全局环境变量 `ELECTRON_RUN_AS_NODE=1` 会把 Electron 退化成纯 node，调用必须 `env -u ELECTRON_RUN_AS_NODE`；
+  ② VS Code/Kimi 等魔改 Electron 二进制优先跑自家 app（传入的 app 路径被当 CLI 参数忽略），不能当通用 runtime，
+  要用 npm 装的原件；③ qlmanage 缩略图不执行 JS，只能看静态版式；④ safaridriver 需在 Safari 设置手动开
+  「允许远程自动化」，未开不可用。harness 在 `/tmp/eleshot`（main.js 通用：`<html> <png> [pre.js] [result.json]`）。
 - Chrome 路径：`C:/Program Files/Google/Chrome/Application/chrome.exe`。
 
-## 下一步（①②已落地并真机复测通过；仅剩远期项）
+## 下一步（#7 已实现未发布；真机复测后按 #9→#8→#10 推进）
 
 ### ① 接收端分辨率阶梯 —— ✅ v1.2 已落地（真机复测完成）
 
@@ -240,6 +275,11 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
 
 - 改法与验收记录见「本轮已完成的改动」v1.3 节；复测数据见「真机实测数据」v1.3 节。
 - 结论：900B@24FPS 解码 ~10/s（v1.2 同期个位数/s），解码瓶颈解除，用户判定可用。
+
+### ③ decode 侧 #7~#10（安卓 ROI 序）/ #5 光学（iPhone 主菜）
+
+- **#7 BarcodeDetector 原生第零档 —— ✅ 已实现（未发布攒批，待安卓真机复测）**。改法与验证见「本轮已完成的改动·未发布」节。
+- 复测通过后按 #9 ROI 跟踪 → #8 Worker 池 ×2 → #10 换帧检测门控推进；#5（相机参数锁定/帧同步信标）是 iPhone 抬供给的主菜。
 
 ### 远期（知道即可）
 
