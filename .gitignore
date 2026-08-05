@@ -2,3 +2,5 @@
 backups/
 # 无头验证/嵌入构建的临时产物（约定下划线开头）
 _*
+# macOS Finder 元数据
+.DS_Store

@@ -175,7 +175,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.5.2 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.6.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -2976,7 +2976,7 @@ const AB = (typeof AirBridge !== 'undefined') ? AirBridge : null;
 /* ================= 全局状态 ================= */
 const $ = id => document.getElementById(id);
 let state = { isSending:false, isPaused:false, frameIdx:0, fps:8, chunkSize:450, timer:null, sender:null, packets:0 };
-let recv = { active:false, stream:null, raf:null, receiver:null, tid:'', scanTick:0, cap:0, failN:0, okN:0 };
+let recv = { active:false, stream:null, raf:null, receiver:null, tid:'', scanTick:0, cap:0, failN:0, okN:0, roi:null };
 let scanCv = null, scanCvCtx = null;
 
 /* ============ 微信检测与引导 ============ */
@@ -3012,7 +3012,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.5.2';
+    ' 解码器:' + dec + ' · v1.6.0';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3191,12 +3191,14 @@ function scanLoop(){
   // 异步路径「忙则丢帧」：解码器未空就不采帧（pull 模型，扫描率≈解码吞吐，统计口径与同步链一致）
   const decBusy = (bd.ready && bd.busy) || (zxw.ready && zxw.busy) || (zxw.mainReady && zxw.mainBusy);
   if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && !decBusy) {
-    // 快慢双速 + 中央裁剪 + 分辨率阶梯：
+    // 快慢双速 + 中央裁剪 + 分辨率阶梯 + ROI 跟踪（#9）：
     // - 快速通道（每帧）：只扫中央 75% 方形区并降到 ≤CAPS[档位]px（起步 640 档，连败升档，见 capLadder）。
     //   竖屏 1080x1920 全帧扫描有 200 万像素，手机解码一帧约 500ms（实测仅 ~2 次/s），
     //   裁剪+降采样后 ~4-10 次/s。QR 需放进屏幕中央对准框内（配合发送端「全屏发射」）。
     //   650B+ 高密帧（≥185 模块）在 640 档只有 2~3px/模块，ZXing 无码可找——升档补像素。
-    // - 深度通道（每 20 帧 1 次）：全帧 ≤1280px 兜底，应对 QR 偏小/不在中央的情况。
+    // - ROI 通道（命中后）：码位置由解码器回传（见 roiTrack），后续帧只裁其邻域 ±35% 送解，
+    //   像素量降一个量级、多数情况原分辨率不降采样；连丢 3 帧回退中央全扫。
+    // - 深度通道（每 20 帧 1 次）：全帧 ≤1280px 兜底，应对 QR 偏小/不在中央/ROI 失锁再捕获。
     const vw = video.videoWidth, vh = video.videoHeight;
     const deep = (recv.scans % 20 === 19);
     let sx, sy, sw, sh, dw, dh;
@@ -3204,6 +3206,13 @@ function scanLoop(){
       sx = 0; sy = 0; sw = vw; sh = vh;
       const sc = Math.min(1, 1280 / Math.max(vw, vh));
       dw = Math.round(vw * sc); dh = Math.round(vh * sc);
+    } else if (recv.roi) {
+      // ROI 跟踪：裁上次命中邻域（外边距抗手抖/移动；失锁由 roiTrack 计数回退）
+      const roi = recv.roi, m = ROI_MARGIN * Math.max(roi.w, roi.h);
+      sx = Math.max(0, Math.floor(roi.x - m)); sy = Math.max(0, Math.floor(roi.y - m));
+      sw = Math.min(vw - sx, Math.ceil(roi.w + 2 * m)); sh = Math.min(vh - sy, Math.ceil(roi.h + 2 * m));
+      const sc = Math.min(1, CAPS[recv.cap] / Math.max(sw, sh));
+      dw = Math.round(sw * sc); dh = Math.round(sh * sc);
     } else {
       sw = sh = Math.floor(Math.min(vw, vh) * 0.75);
       sx = (vw - sw) >> 1; sy = (vh - sh) >> 1;
@@ -3213,15 +3222,17 @@ function scanLoop(){
     if (!scanCv) { scanCv = document.createElement('canvas'); scanCvCtx = scanCv.getContext('2d', { willReadFrequently: true }); }
     scanCv.width = dw; scanCv.height = dh;
     scanCvCtx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+    // 本帧 视频→图像 映射：异步解码结果回来换算 ROI 视频坐标用（pull 模型单帧在飞，不会串帧）
+    recv._map = { sx:sx, sy:sy, sw:sw, sh:sh, dw:dw, dh:dh };
     try {
       recv.scans++;
       if (bd.ready) {
         // 原生第零档（BarcodeDetector）：detect 走系统检测服务不卡主线程，直接吃 canvas，
         // 省 getImageData 一次全帧拷贝；多尺度由检测器内部处理，无需 CAP_SCALES 轮换
         bd.busy = true;
-        bdDetectText(scanCv).then(text => {
+        bdDetectText(scanCv).then(r => {
           bd.busy = false; bd.errN = 0;
-          onDecodeDone(deep, text);
+          onDecodeDone(deep, r.text, r.pos);
         }).catch(e => {
           bd.busy = false;
           console.debug('bd detect err:', e && e.message);
@@ -3274,6 +3285,25 @@ function capLadder(r, ok){
     if (r.failN >= 12 && r.cap < CAPS.length - 1) { r.cap++; r.failN = 0; }
   }
 }
+/* ===== #9 ROI 跟踪（RESEARCH §8）=====
+   命中后由解码器回传码位置（原生档 boundingBox / wasm 四角 position 归一到 scale 1），换算成视频源像素
+   坐标存 r.roi；后续快速帧只裁其邻域 ±ROI_MARGIN 送解——像素量降一个量级，单次解码成本大降（直解安卓
+   算力瓶颈），省下的 CPU 同时降发热耗电。丢失容忍 ROI_MAX_MISS 帧（手抖/换帧混叠的瞬时 miss），连续
+   丢失回退中央全扫；深度通道不罚 miss（与阶梯同口径），其全帧命中兼作失锁再捕获。三级同步链不接（零回归）。 */
+const ROI_MARGIN = 0.35;   // 邻域外边距（各边，按码长边比例）：抗帧间移动/手抖
+const ROI_MAX_MISS = 3;    // 连续丢失帧数上限：超过即弃 ROI 回退中央 75% 全扫
+/* ROI 状态机：hit=本帧是否解码成功，pos=码在送解图像中的 bbox {x,y,w,h}（scale 1 口径，可为 null）。
+   坐标换算靠 r._map（本帧 视频→图像 映射，scanLoop dispatch 时存）。独立小函数便于无头单测。 */
+function roiTrack(r, deep, hit, pos){
+  if (hit) {
+    if (pos && r._map) {
+      const m = r._map, kx = m.sw / m.dw, ky = m.sh / m.dh;
+      r.roi = { x: m.sx + pos.x * kx, y: m.sy + pos.y * ky, w: pos.w * kx, h: pos.h * ky, miss: 0 };
+    } else if (r.roi) r.roi.miss = 0;   // 码还在但位置未知：沿用旧位置
+  } else if (!deep && r.roi) {
+    if (++r.roi.miss >= ROI_MAX_MISS) r.roi = null;  // 连续丢失：回退中央全扫（深度通道不罚）
+  }
+}
 /* ===== BarcodeDetector 原生第零档（RESEARCH §8 #7）=====
    安卓 Chrome 的 Shape Detection API：QR 检测走系统/硬件服务，比 wasm 快一个量级。
    探测两步：'BarcodeDetector' in window + getSupportedFormats() 含 qr_code
@@ -3303,11 +3333,14 @@ async function initBarcodeDetector(){
     renderEnvCheck();
   }
 }
-/* 单帧检测：独立小函数便于无头单测；resolve text|null，reject 由调用方计数降级 */
+/* 单帧检测：独立小函数便于无头单测；resolve {text, pos}（pos = boundingBox 送解图像坐标，供 #9 ROI），
+   reject 由调用方计数降级 */
 function bdDetectText(src){
   return bd.det.detect(src).then(rs => {
     const hit = rs && rs.find(x => x && x.rawValue);
-    return hit ? hit.rawValue : null;
+    if (!hit) return { text: null, pos: null };
+    const b = hit.boundingBox;
+    return { text: hit.rawValue, pos: b ? { x: b.x, y: b.y, w: b.width, h: b.height } : null };
   });
 }
 /* ===== zxing-wasm 解码管线（v1.3）· 三级降级链 =====
@@ -3316,7 +3349,7 @@ function bdDetectText(src){
      解码时短暂卡 UI，但仍远快于 zxing-js。
    三级 同步兜底：zxing-js → jsQR（decodeQR），行为与 v1.2 一致。
    - Worker 源码 = 惰性块 zxwGlue（zxing-wasm IIFE）+ zxwWasm（base64 字节）+ 本文件纯函数源码
-     （rescaleImg / zxwWorkerMain 经 .toString() 注入，避免两份维护；二者必须保持自包含、不引外部变量）。
+     （rescaleImg / posOfHit / zxwWorkerMain 经 .toString() 注入，避免两份维护；三者必须保持自包含、不引外部变量）。
    - 全程无 fetch：wasmBinary 直接喂字节（file:// 可用）；Worker 用 Blob URL 创建（file:// 可用）。
    - 解码成功/阶梯计数统一在 onDecodeDone 回填；失败原因写入 zxw.err / zxw.mainErr 并显示在 envCheck。 */
 let zxw = { worker:null, ready:false, busy:false, failed:false, err:'',
@@ -3329,6 +3362,7 @@ function initWasmDecoder(){
     const src = $('zxwGlue').textContent +
       '\n;var WASM_B64=' + JSON.stringify($('zxwWasm').textContent) + ';' +
       '\nvar rescaleImg=' + rescaleImg.toString() + ';' +
+      '\nvar posOfHit=' + posOfHit.toString() + ';' +
       '\n(' + zxwWorkerMain.toString() + ')();';
     zxw.worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     zxw.worker.onmessage = onWasmMsg;
@@ -3366,11 +3400,11 @@ function onWasmMsg(ev){
   if (m.type === 'fail') { failWasm('wasm初始化:' + (m.err || '')); return; }
   if (m.type !== 'frame') return;
   zxw.busy = false;
-  onDecodeDone(m.deep, m.text);
+  onDecodeDone(m.deep, m.text, m.pos);
 }
 /* 二级降级解码：主线程跑 wasm（readBarcodes 的 wasm 调用本身同步阻塞，await 仅是接口形态） */
 async function decodeViaWasmMain(img, dw, dh, deep){
-  let text = null;
+  let text = null, pos = null;
   const scales = deep ? [1] : CAP_SCALES;
   for (const f of scales) {
     let d = img.data, w = dw, h = dh;
@@ -3378,16 +3412,18 @@ async function decodeViaWasmMain(img, dw, dh, deep){
     try {
       const rs = await ZXW_MAIN.readBarcodes({ data: d, width: w, height: h }, ZXW_OPTS);
       const hit = rs && rs.find(x => x.isValid && x.text);
-      if (hit) { text = hit.text; break; }
+      if (hit) { text = hit.text; pos = posOfHit(hit, f); break; }
     } catch (e) { /* 本尺度未解出，试下一档 */ }
   }
   zxw.mainBusy = false;
-  onDecodeDone(deep, text);
+  onDecodeDone(deep, text, pos);
 }
-/* 解码回填（bd/wasm 四条路径共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道 */
-function onDecodeDone(deep, text){
+/* 解码回填（bd/wasm 四条路径共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道；
+   pos = 码在送解图像中的 bbox（#9 ROI，可为 null），roiTrack 据此换算视频坐标维护跟踪状态 */
+function onDecodeDone(deep, text, pos){
   if (!recv.active) return;
   if (!deep) capLadder(recv, !!text);
+  roiTrack(recv, deep, !!text, pos || null);
   if (text) { recv.decoded++; flashReader(); handleFrame(text); }
 }
 /* Worker 内运行的主体（经 .toString() 注入，必须自包含）：
@@ -3403,18 +3439,28 @@ function zxwWorkerMain(){
   self.onmessage = async (ev) => {
     const m = ev.data;
     const src = new Uint8ClampedArray(m.buf);
-    let text = null;
+    let text = null, pos = null;
     for (const f of m.scales) {
       let d = src, w = m.w, h = m.h;
       if (f !== 1) { const r = rescaleImg(src, m.w, m.h, Math.round(Math.min(m.w, m.h) * f)); d = r.rgba; w = r.w; h = r.h; }
       try {
         const rs = await ZXingWASM.readBarcodes({ data: d, width: w, height: h }, OPTS);
         const hit = rs && rs.find(x => x.isValid && x.text);
-        if (hit) { text = hit.text; break; }
+        if (hit) { text = hit.text; pos = posOfHit(hit, f); break; }
       } catch (e) { /* 本尺度未解出，试下一档 */ }
     }
-    self.postMessage({ type: 'frame', deep: m.deep, text: text });
+    self.postMessage({ type: 'frame', deep: m.deep, text: text, pos: pos });
   };
+}
+/* 从 wasm 命中结果提取码 bbox 并归一到送解输入图坐标（除以命中尺度 f）：四角 position → {x,y,w,h}。
+   经 .toString() 注入 worker（与 rescaleImg 同路），必须自包含、不引外部变量；主线程二级档同用（#9 ROI）。 */
+function posOfHit(hit, f){
+  const p = hit && hit.position;
+  if (!p || !p.topLeft) return null;
+  const xs = [p.topLeft.x, p.topRight.x, p.bottomLeft.x, p.bottomRight.x];
+  const ys = [p.topLeft.y, p.topRight.y, p.bottomLeft.y, p.bottomRight.y];
+  const x0 = Math.min(...xs) / f, y0 = Math.min(...ys) / f;
+  return { x: x0, y: y0, w: Math.max(...xs) / f - x0, h: Math.max(...ys) / f - y0 };
 }
 /* 盒式平均重采样（自带低通，抑制屏幕晶格混叠） */
 function rescaleImg(rgba, w, h, targetMin) {
@@ -3471,13 +3517,14 @@ function startStats(){
   stopStats();
   recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0;
   recv.cap = 0; recv.failN = 0; recv.okN = 0;  // 分辨率阶梯复位：每次开扫从 640 档起步
+  recv.roi = null;                             // ROI 跟踪复位：每次开扫从中央全扫起步（#9）
   $('scanStats').textContent = '诊断已启动，对准发送端屏幕…';
   let lastS = 0, lastD = 0;
   recv.statsT = setInterval(()=>{
     const s = recv.scans - lastS, d = recv.decoded - lastD;
     lastS = recv.scans; lastD = recv.decoded;
     $('scanStats').textContent = '扫描 ' + s + '/s · 解码 ' + d + '/s · 拒收 ' + recv.rejected + ' · 重复 ' + recv.dup +
-      ' · 档位 ' + CAPS[recv.cap] +
+      ' · 档位 ' + CAPS[recv.cap] + (recv.roi ? ' · ROI✓' : '') +
       (d > 0 ? '（解码正常但进度不涨 = 发送端没出新帧）' : '（解码为 0：发送端点「全屏发射」，QR 对准中央虚线框）');
   }, 1000);
 }
@@ -3546,6 +3593,7 @@ function resetAll(){
   recv.tid = ''; recv.manifestShown = false;
   recv.scans = 0; recv.decoded = 0; recv.rejected = 0; recv.dup = 0;
   recv.cap = 0; recv.failN = 0; recv.okN = 0;
+  recv.roi = null;                 // ROI 跟踪一并废弃（#9）
   $('recvProg').classList.add('hidden');
   $('okCard').classList.add('hidden');
   $('progBar').style.width = '0%';

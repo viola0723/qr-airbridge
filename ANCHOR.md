@@ -1,7 +1,7 @@
 # QR-AirBridge · 项目锚点
 
 > 给新会话的快速定位文件。技术调研与迭代路线见同目录 `RESEARCH.md`。
-> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；**v1.5.0~v1.5.2 已发布：#7 原生第零档——真机结论：用户双端不可用（安卓 Chrome 无qr_code 缺后端、iPhone Safari 无API），功能保留给外部 GMS/桌面用户，v1.5.2 起 skip 原因不上屏；UI 修复两项真机已验**；下一步 = decode 侧 #9→#8→#10（安卓）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
+> 最后更新：2026-08-05（①②已落地并真机复测通过；v1.4.0 滑块上限 FPS 50/单帧 1300 + 接收完成提示音；**已开源 <https://github.com/viola0723/qr-airbridge>**；**v1.5.0~v1.5.2 已发布：#7 原生第零档——真机结论：用户双端不可用（安卓 Chrome 无qr_code 缺后端、iPhone Safari 无API），功能保留给外部 GMS/桌面用户，v1.5.2 起 skip 原因不上屏；UI 修复两项真机已验**；**v1.6.0 = #9 ROI 跟踪已落地（无头 42 断言 + Electron 真回环全绿，待真机复测）**；下一步 = #8 Worker 池→#10 换帧门控（安卓）/ #5 光学时序（iPhone 优先），讨论结论已固化于 RESEARCH §5/§8）
 
 ## 这是什么
 
@@ -85,8 +85,8 @@ wasm 链仍是主力，#9/#8/#10 方向确认；原生档保留给外部 GMS 安
 - `backups/` 存放只读基线副本：每轮较大改动前先复制 `index.html` 进去，命名 `index-v<版本>-<日期>.html`，并 `chmod 444` 防误改。覆盖只读备份前先 `chmod 644`，改完再 `chmod 444`。
 - 2026-08-04 起项目已开源：<https://github.com/viola0723/qr-airbridge>（本地 git 仓库在 `main`，提交身份 viola0723 + noreply 邮箱；`backups/` 经 `.gitignore` 不入库，仍作本地只读基线）。
   **GitHub Pages 在线版已开通**：<https://viola0723.github.io/qr-airbridge/>（push 后自动重建，1~3 分钟生效）——https 环境是手机端最佳姿势（摄像头安全上下文 + iPhone worker 档解锁），推荐日常使用。
-- 当前基线：`backups/index-v1.5.2-20260805.html`（#7 原生第零档 + 显示收敛 + UI 修复两项）。改崩了直接拷回覆盖。
-- 历史基线：`index-v1.5.1-20260805.html`（#7 探测可诊断）、`index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）、`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
+- 当前基线：`backups/index-v1.6.0-20260805.html`（#9 ROI 跟踪）。改崩了直接拷回覆盖。
+- 历史基线：`index-v1.5.2-20260805.html`（#7 原生第零档 + 显示收敛 + UI 修复两项）、`index-v1.5.1-20260805.html`（#7 探测可诊断）、`index-v1.5.0-20260805.html`（#7 BarcodeDetector 原生第零档 + UI 修复两项）、`index-v1.4.0-20260804.html`（滑块上限 FPS 50 / 单帧 1300 + 完成提示音）、`index-v1.3.2-20260804.html`（三级解码链 + 滑块上限 FPS 30 / 单帧 1200）、`index-v1.3.1-20260804.html`（三级解码链）、`index-v1.3-20260803.html`（zxing-wasm+Worker 首版）、`index-v1.2-20260803.html`（接收端分辨率阶梯）、`index-v1.1-20260803.html`（Robust Soliton 纯喷泉）、`index-v1.0-20260803.html`（协议 v2 首版）、`index-v0.9-20260803.html`（协议 v1）。
 
 ## index.html 结构地图（行号会漂移，以区段注释为准）
 
@@ -100,7 +100,7 @@ wasm 链仍是主力，#9/#8/#10 方向确认；原生档保留给外部 GMS 安
 | zxing-js (Apache-2.0) | 2497–2499 | 降级链主解码器（HybridBinarizer 局部自适应二值化） |
 | zxing-wasm reader (MIT) | 2502–2503 | `text/plain` 惰性块（不执行）：IIFE glue + WASM base64，作 Blob Worker 源码/字节仓 |
 | AirBridge 引擎 | 2504–2971 | CRC32 / SHA-256 / base45 / deflate / Soliton / Fountain / Sender / Receiver / Store |
-| 应用层 | 2973–末尾 | 全局状态、微信引导、发送端、接收端、bd 第零档 + wasm worker 管线、帧处理、Tab 切换 |
+| 应用层 | 2973–末尾 | 全局状态、微信引导、发送端、接收端、bd 第零档 + wasm worker 管线、#9 ROI 跟踪（roiTrack/posOfHit）、帧处理、Tab 切换 |
 
 ## 线协议（v2 帧格式 + v1.1 度分布/种子语义，v1.2/v1.3 未动协议、v1.1+ 可混发收；v0.9/v1.0/v1.1 两两互不兼容，同文件收发同步升级）
 
@@ -258,6 +258,23 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   仅 原生✓（生效）与 原生✗（运行期 detect 连续异常降级）显示。
 - 验证：node 探测矩阵 6 断言全绿（五路 skip 留底不上屏 + 原生✓ 正常显示）；app 块 `node --check` OK。
 
+**v1.6.0 = #9 ROI 跟踪（2026-08-05，RESEARCH §8，待真机复测）**
+- 链路：命中后解码器回传码位置（原生档 `boundingBox`；wasm 四角 `position` 经 `posOfHit` 除以命中尺度归一），
+  `roiTrack` 换算成视频源像素坐标存 `recv.roi`；后续快速帧只裁其邻域 ±35%（`ROI_MARGIN`）送解——
+  像素量降一个量级、多数情况原分辨率不降采样，单次解码成本大降（直解安卓算力瓶颈，兼降发热耗电）。
+- 状态机：连丢 3 帧（`ROI_MAX_MISS`，容忍手抖/换帧混叠的瞬时 miss）弃 ROI 回退中央 75% 全扫；
+  深度通道不罚 miss（与阶梯同口径），其全帧命中兼作失锁再捕获；命中无 pos 仅清 miss 沿用旧位置。
+- 接线：`zxwWorkerMain`/`decodeViaWasmMain` 命中提取 pos 随帧回传（`onDecodeDone` 第三参）；
+  `bdDetectText` 改 resolve `{text,pos}`；`posOfHit` 经 `.toString()` 注入 worker（与 rescaleImg 同路，自包含）；
+  scanLoop dispatch 时存 `recv._map`（视频→图像映射，pull 模型单帧在飞不会串）；**三级同步链不接（零回归）**。
+- 统计行加「ROI✓」（跟踪激活时）；`startStats`/`resetAll` 复位 roi。版本号 v1.6.0（新能力 minor）；线协议不动，可混发收。
+- 验证：语法双段 `node --check` OK；node 接线 harness **42 断言全绿**（capLadder 12 回归 / roiTrack 7 /
+  posOfHit 3 / scanLoop worker 集成 13（中央 75% → ROI 收窄 (592,172,431,431) 原分辨率送解 → 连丢 3 帧回退 →
+  深度再捕获 → 统计行）/ bd 集成 3 / resetAll 1 / 20KB 喷泉回环 3，harness 用后已删）；
+  **Electron 真回环 7 断言全绿**（Chromium 真 worker-wasm 解码真 QR：pos 像素级准确（exp(134,149,403) = got(134,150,403,402)）、
+  roiTrack 换算 ≈ 码真实视频位置、ROI 路径喷泉 14/14 解码拼完字节逐位一致）；两 tab 截图无破版。
+- **待真机复测**：对比安卓 worker 档 ~10/s 基线（预期显著抬升）；iPhone 二级主线程档同验。
+
 ## 已知遗留
 
 - 引擎里有 IndexedDB 断点续传 `Store`，但接收流程未接入（仅在接收完成时 `remove`）。
@@ -288,7 +305,7 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
   「允许远程自动化」，未开不可用。harness 在 `/tmp/eleshot`（main.js 通用：`<html> <png> [pre.js] [result.json]`）。
 - Chrome 路径：`C:/Program Files/Google/Chrome/Application/chrome.exe`。
 
-## 下一步（#7 已实现未发布；真机复测后按 #9→#8→#10 推进）
+## 下一步（#9 已落地待真机复测；复测后按 #8→#10 推进）
 
 ### ① 接收端分辨率阶梯 —— ✅ v1.2 已落地（真机复测完成）
 
@@ -302,8 +319,9 @@ QR **alphanumeric** 模式文本，定长头、无分隔符：
 
 ### ③ decode 侧 #7~#10（安卓 ROI 序）/ #5 光学（iPhone 主菜）
 
-- **#7 BarcodeDetector 原生第零档 —— ✅ 已实现（未发布攒批，待安卓真机复测）**。改法与验证见「本轮已完成的改动·未发布」节。
-- 复测通过后按 #9 ROI 跟踪 → #8 Worker 池 ×2 → #10 换帧检测门控推进；#5（相机参数锁定/帧同步信标）是 iPhone 抬供给的主菜。
+- **#7 BarcodeDetector 原生第零档 —— ✅ v1.5.0~v1.5.2 已发布**（真机结论：用户双端不可用，功能保留给外部 GMS/桌面用户）。
+- **#9 ROI 跟踪 —— ✅ v1.6.0 已落地（待真机复测）**。改法与验证见「本轮已完成的改动」v1.6.0 节。
+- 复测通过后按 #8 Worker 池 ×2 → #10 换帧检测门控推进；#5（相机参数锁定/帧同步信标）是 iPhone 抬供给的主菜。
 
 ### 远期（知道即可）
 
