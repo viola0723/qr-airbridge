@@ -83,6 +83,10 @@
     </div>
   </header>
 
+  <!-- 加载完成提示：本页 ~1.9MB 单文件，网络波动可能只载到半截（脚本不全、按钮失灵）。
+       占位文案常驻 = 未载完整，提示操作者刷新；应用层脚本（全文件最后一段）跑起来后改为「加载完成」。 -->
+  <div class="log" id="bootMsg">⏳ 页面加载中…（若此提示常驻不消失 = 文件未完整加载，请刷新重进）</div>
+
   <!-- ============ 发送端 ============ -->
   <section id="panelSend">
     <div class="card">
@@ -175,7 +179,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.7.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.7.1 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -3013,10 +3017,14 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.7.0';
+    ' 解码器:' + dec + ' · v1.7.1';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
+  // 加载完成提示：应用层是全文件最后一段脚本，DOMContentLoaded 能触发 = 全文件已完整加载解析
+  const bm = $('bootMsg');
+  bm.textContent = '✅ 页面加载完成'; bm.style.color = 'var(--green)';
+  setTimeout(() => bm.classList.add('hidden'), 6000);
   wechatGuard();
   // 刷新后恢复之前的 tab（接收页重置=刷新页面，需回到接收页）
   try { if (sessionStorage.getItem('ab_tab') === 'recv') switchTab('recv'); } catch(e){}
@@ -3214,10 +3222,9 @@ function scanLoop(){
       const sc = Math.min(1, 1280 / Math.max(vw, vh));
       dw = Math.round(vw * sc); dh = Math.round(vh * sc);
     } else if (recv.roi) {
-      // ROI 跟踪：裁上次命中邻域（外边距抗手抖/移动；失锁由 roiTrack 计数回退）
-      const roi = recv.roi, m = ROI_MARGIN * Math.max(roi.w, roi.h);
-      sx = Math.max(0, Math.floor(roi.x - m)); sy = Math.max(0, Math.floor(roi.y - m));
-      sw = Math.min(vw - sx, Math.ceil(roi.w + 2 * m)); sh = Math.min(vh - sy, Math.ceil(roi.h + 2 * m));
+      // ROI 跟踪：裁上次命中邻域（矩形经 16px 网格对齐，见 roiSnapRect；失锁由 roiTrack 计数回退）
+      const rr = roiSnapRect(recv.roi, vw, vh);
+      sx = rr.sx; sy = rr.sy; sw = rr.sw; sh = rr.sh;
       const sc = Math.min(1, CAPS[recv.cap] / Math.max(sw, sh));
       dw = Math.round(sw * sc); dh = Math.round(sh * sc);
     } else {
@@ -3306,6 +3313,19 @@ function capLadder(r, ok){
    丢失回退中央全扫；深度通道不罚 miss（与阶梯同口径），其全帧命中兼作失锁再捕获。三级同步链不接（零回归）。 */
 const ROI_MARGIN = 0.35;   // 邻域外边距（各边，按码长边比例）：抗帧间移动/手抖
 const ROI_MAX_MISS = 3;    // 连续丢失帧数上限：超过即弃 ROI 回退中央 75% 全扫
+/* ROI 裁剪矩形（16px 网格对齐）：解码器回传的码位置每帧有 ±数 px 抖动，若直接作裁剪矩形，
+   每次命中更新 ROI 都会改变矩形 → #10 门控的「同矩形」判定（gateSkip 严格等值比较）随之失效
+   → 发送端未换帧时同帧被重解（系统性 dup/空耗源，v1.7.0 真机复测发现）。对齐网格后微抖
+   不再改矩形、同帧判同成立；真实移动越过网格线才换矩形（多送一帧，可接受）。独立小函数便于无头单测。 */
+const ROI_SNAP = 16;
+function roiSnapRect(roi, vw, vh){
+  const m = ROI_MARGIN * Math.max(roi.w, roi.h);
+  const sx = Math.max(0, Math.floor((roi.x - m) / ROI_SNAP) * ROI_SNAP);
+  const sy = Math.max(0, Math.floor((roi.y - m) / ROI_SNAP) * ROI_SNAP);
+  const sw = Math.min(vw - sx, Math.ceil((roi.x + roi.w + m) / ROI_SNAP) * ROI_SNAP - sx);
+  const sh = Math.min(vh - sy, Math.ceil((roi.y + roi.h + m) / ROI_SNAP) * ROI_SNAP - sy);
+  return { sx:sx, sy:sy, sw:sw, sh:sh };
+}
 /* ROI 状态机：hit=本帧是否解码成功，pos=码在送解图像中的 bbox {x,y,w,h}（scale 1 口径，可为 null）。
    坐标换算靠 r._map（本帧 视频→图像 映射，scanLoop dispatch 时存）。独立小函数便于无头单测。 */
 function roiTrack(r, deep, hit, pos){
@@ -3501,27 +3521,12 @@ async function decodeViaWasmMain(img, dw, dh, deep){
 }
 /* 解码回填（bd/wasm 四条路径共用）：停止扫描后到达的迟到结果直接丢弃；阶梯只统计快速通道；
    pos = 码在送解图像中的 bbox（#9 ROI，可为 null），roiTrack 据此换算视频坐标维护跟踪状态 */
-/* #5a 对焦锁定（能力探测，保守落地）：focusMode 支持 single-shot 才锁——一次对焦后保持，
-   治安卓「对焦会飘」；iOS/不支持设备无此项 → 静默跳过。曝光/白平衡锁定各机行为差异大、
-   无通用安全默认值，不泛化（RESEARCH §6 记录）。 */
-function lockCamParams(){
-  try {
-    const t = recv.stream && recv.stream.getVideoTracks()[0];
-    if (!t || !t.getCapabilities || !t.applyConstraints) return;
-    const c = t.getCapabilities();
-    if (c.focusMode && c.focusMode.indexOf('single-shot') >= 0) {
-      t.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(()=>{});
-    }
-  } catch (e) { /* 不支持/锁定失败均静默，不扰解码主路 */ }
-}
 function onDecodeDone(deep, text, pos){
   if (!recv.active) return;
   if (!deep) capLadder(recv, !!text);
   roiTrack(recv, deep, !!text, pos || null);
   if (text) {
     recv.decoded++; flashReader(); handleFrame(text);
-    // #5a：首次命中时已对准且对焦收敛，此刻锁定最稳；失败与否不再重试（每次开扫重置标志）
-    if (!recv._camLocked) { recv._camLocked = true; lockCamParams(); }
   }
 }
 /* Worker 内运行的主体（经 .toString() 注入，必须自包含）：
@@ -3617,7 +3622,6 @@ function startStats(){
   recv.cap = 0; recv.failN = 0; recv.okN = 0;  // 分辨率阶梯复位：每次开扫从 640 档起步
   recv.roi = null;                             // ROI 跟踪复位：每次开扫从中央全扫起步（#9）
   recv._gate = null; recv._gateSkips = 0;      // 换帧门控复位：签名与连跳计数清零（#10/#5b）
-  recv._camLocked = false;                     // 对焦锁定复位：下次开扫首次命中时重锁（#5a）
   $('scanStats').textContent = '诊断已启动，对准发送端屏幕…';
   let lastS = 0, lastD = 0, lastK = 0;
   recv.statsT = setInterval(()=>{
@@ -3667,6 +3671,7 @@ function playDoneSound(ok){
 }
 async function finalizeRecv(){
   const r = recv.receiver;
+  const tEnd = Date.now();  // 传输计时终点：末帧到齐即记（不计入后续重组/校验耗时）
   const out = await r.assemble();
   if (!out) return;
   await stopAllScanning();
@@ -3676,6 +3681,11 @@ async function finalizeRecv(){
   // SHA 校验
   const ok = await r.verify(out);
   $('okInfo').textContent += ok ? ' · SHA-256 ✓' : ' · ⚠️ 校验失败';
+  // 传输耗时与平均速率（首帧认任务 → 末帧到齐的墙钟时间），供真机复测记录
+  if (recv.t0) {
+    const dur = (tEnd - recv.t0) / 1000;
+    $('okInfo').textContent += ' · 耗时 ' + dur.toFixed(1) + 's（≈' + (r.fileSize / 1024 / dur).toFixed(1) + ' KB/s）';
+  }
   playDoneSound(ok);
   if (navigator.vibrate) navigator.vibrate(ok ? [80, 60, 120] : 300);
   $('dlBtn').onclick = () => {
@@ -3697,7 +3707,7 @@ function resetAll(){
   recv.cap = 0; recv.failN = 0; recv.okN = 0;
   recv.roi = null;                 // ROI 跟踪一并废弃（#9）
   recv._gate = null; recv._gateSkips = 0;   // 换帧门控一并废弃（#10/#5b）
-  recv._camLocked = false;                  // 对焦锁定标志复位（#5a）
+  recv.t0 = 0;                              // 传输计时清零
   $('recvProg').classList.add('hidden');
   $('okCard').classList.add('hidden');
   $('progBar').style.width = '0%';
@@ -3721,6 +3731,7 @@ function handleFrame(raw){
   if (r.tid && r.tid !== recv.tid) {
     recv.tid = r.tid;
     recv.manifestShown = false;
+    recv.t0 = Date.now();  // 传输计时起点：本端认出该任务的首帧（finalizeRecv 出耗时）
     $('recvFname').textContent = '任务 ' + r.tid + '（等待清单块…）';
     $('recvShaBadge').textContent = 'SHA -';
     $('recvProg').classList.remove('hidden');
