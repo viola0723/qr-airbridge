@@ -100,17 +100,13 @@
     </div>
     <div class="card">
       <h2>2 · 参数与发射</h2>
-      <div class="btnrow" style="margin-top:10px;">
-        <button class="btn btn-ghost" onclick="presetRecv('ios')" title="苹果接收端实测甜点">🍎 苹果 50·1300</button>
-        <button class="btn btn-ghost" onclick="presetRecv('android')" title="安卓接收端实测最佳">🤖 安卓 50·1300</button>
+      <div class="optrow">
+        <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">50</span> FPS</label>
+        <input type="range" id="fpsRange" min="30" max="50" value="50" oninput="onFps(this.value)">
       </div>
       <div class="optrow">
-        <label>速度 <span id="fpsVal" style="color:var(--blue);font-weight:800;">30</span> FPS</label>
-        <input type="range" id="fpsRange" min="30" max="50" value="30" oninput="onFps(this.value)">
-      </div>
-      <div class="optrow">
-        <label>单帧 <span id="sizeVal" style="color:var(--blue);font-weight:800;">650</span> B</label>
-        <input type="range" id="sizeRange" min="650" max="1300" step="50" value="650" oninput="onSize(this.value)">
+        <label>单帧 <span id="sizeVal" style="color:var(--blue);font-weight:800;">1300</span> B</label>
+        <input type="range" id="sizeRange" min="650" max="1300" step="50" value="1300" oninput="onSize(this.value)">
       </div>
       <div class="optrow">
         <label><input type="checkbox" id="chkCompress" checked> 压缩(deflate)</label>
@@ -183,7 +179,7 @@
     </div>
   </section>
 
-  <footer>QR-AirBridge v1.9.0 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
+  <footer>QR-AirBridge v1.9.1 · 数据全程屏幕→摄像头视觉通道 · 不经任何网络</footer>
 </div>
 
 <!-- 全屏发射覆盖层 -->
@@ -2815,7 +2811,10 @@ var qrcode = function() {
       mblk[0] = mBytes.length >> 8; mblk[1] = mBytes.length & 0xff;
       mblk.set(mBytes, 2);
       this.chunks.unshift(mblk);             // 块 0 = 清单块，数据块顺延；空文件时 L=1
-      this.tid = Math.random().toString(36).slice(2, 10).toUpperCase();  // 8字符 ≈ 2.8万亿空间
+      // 8字符 base36 ≈ 2.8万亿空间；padEnd 兜底短展开：toString(36) 是最短往返表示，
+      // 小概率少字符（2e6 采样实测 12 次短 1 位）——短 TID 使头部 ≠18 字符，接收端定长解析
+      // 整体错位 → 全任务拒收（真机疑似命中一次：650B 档「解码极少 + 拒收 70+」，v1.9.1 修复）
+      this.tid = Math.random().toString(36).slice(2, 10).toUpperCase().padEnd(8, '0');
       const L = this.chunks.length;
       return { chunks: L, size: this.fileSize, sha: this.fileSHA, compressed, origKB: Math.round(raw.length/1024), compKB: Math.round(data.length/1024) };
     }
@@ -2983,7 +2982,7 @@ var qrcode = function() {
 const AB = (typeof AirBridge !== 'undefined') ? AirBridge : null;
 /* ================= 全局状态 ================= */
 const $ = id => document.getElementById(id);
-let state = { isSending:false, isPaused:false, frameIdx:0, fps:30, chunkSize:650, timer:null, sender:null, packets:0 };
+let state = { isSending:false, isPaused:false, frameIdx:0, fps:50, chunkSize:1300, timer:null, sender:null, packets:0 };
 let recv = { active:false, stream:null, raf:null, receiver:null, tid:'', scanTick:0, cap:0, failN:0, okN:0, roi:null };
 let scanCv = null, scanCvCtx = null;
 let gateCv = null, gateCvCtx = null, bceCv = null, bceCvCtx = null;  // #10 门控 16×16 签名画布 + #5b 信标 4×4 采样画布
@@ -3021,7 +3020,7 @@ function renderEnvCheck(){
   $('envCheck').textContent = '环境自检 · 安全上下文:' + (window.isSecureContext ? '✓' : '✗(请换 Chrome 打开)') +
     ' 摄像头API:' + (okCam ? '✓' : '✗') +
     ' 引擎:' + (AB ? '✓' : '✗') +
-    ' 解码器:' + dec + ' · v1.9.0';
+    ' 解码器:' + dec + ' · v1.9.1';
 }
 /* 页面加载初始化 */
 document.addEventListener('DOMContentLoaded', () => {
@@ -3038,17 +3037,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ============ 发送端 ============ */
-/* 接收端预设：一键到真机实测甜点。视觉通道无反馈，发送端参数无自动配置（硬约束），
-   预设把「看统计行调参」收成一键；拖动条保留，预设只是快捷方式。
-   苹果 = 50/1300（v1.7.1 复测 460KB/17s ≈24KB/s，Web 层光学上限）；
-   安卓 = 50/1300（v1.8.0 复测实测最佳 ≈10KB/s；30/50fps 无差异，取 50 保好条件上限；
-   卡点在手机 ISP 光学供给而非参数；650B 是否更稳无 60fps 相机时代实测，有更优数据改 PRESETS 即可）。 */
-const PRESETS = { ios: { fps: 50, size: 1300 }, android: { fps: 50, size: 1300 } };
-function presetRecv(name){
-  const p = PRESETS[name]; if (!p) return;
-  $('fpsRange').value = p.fps; $('sizeRange').value = p.size;
-  onFps(p.fps); onSize(p.size);
-}
 function onFps(v){ state.fps = +v; $('fpsVal').textContent = v; if(state.isSending) restartTimer(); }
 function onSize(v){ state.chunkSize = +v; $('sizeVal').textContent = v; }
 

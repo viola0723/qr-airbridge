@@ -34,14 +34,14 @@ QR-AirBridge moves files across an air gap over a one-way visual channel:
 | Android phone | 1300 B @ 50 FPS | ≈ 10 KB/s wall-clock (460 KB file) — limited by the phone ISP's exposure behavior (half of dispatched frames undecodable), not by SoC compute |
 | iPhone | 1300 B @ 50 FPS | ≈ 24 KB/s wall-clock (460 KB in ~17 s) — WebKit caps the camera at 30 FPS; optical ceiling |
 
-Your mileage will vary — the visual channel depends on the camera and the screen. Use the **🍎 苹果 / 🤖 安卓 preset buttons** (measured sweet spots) or tune the FPS / frame-size sliders while watching the live stats line (扫描/解码 per second); the completion card reports wall-clock time and KB/s.
+Your mileage will vary — the visual channel depends on the camera and the screen. Defaults are the measured sweet spot (50 FPS / 1300 B); weaker devices can lower the FPS / frame-size sliders while watching the live stats line (扫描/解码 per second); the completion card reports wall-clock time and KB/s.
 
 ### Quick start
 
 1. **Sender (PC)**: open `index.html` in Chrome/Edge — double-click works.
 2. **Receiver (phone)**: open the same file in the phone browser. Best practice: serve it over **HTTPS** — `getUserMedia` needs a secure context, and on iOS HTTPS also unlocks the Worker decoder tier. (Opening inside WeChat's built-in browser can't use the camera; use "Open in browser".)
 3. Sender: choose file → 开始发送 → 全屏发射. Receiver: 启动摄像头, aim at the on-screen alignment box.
-4. Tune: tap the 🍎 苹果 / 🤖 安卓 preset for the measured sweet spot, or raise FPS first, then frame size, until 解码/s stops keeping up with the frame supply.
+4. Tune: defaults are the measured sweet spot (50 FPS / 1300 B); on weaker devices lower FPS first, then frame size, until 解码/s keeps up with the frame supply.
 
 ### Wire protocol (v2, one QR alphanumeric frame)
 
@@ -83,8 +83,8 @@ Fixed-length header, no separators. A seed-driven PRNG (LCG-16807) reproduces th
 | 安卓手机 | 1300B @ 50 FPS | 耗时口径 ≈10 KB/s（460KB 实测）——卡在手机 ISP 光学供给（派发帧半数解不出），非 SoC 算力 |
 | iPhone | 1300B @ 50 FPS | 耗时口径 ≈24 KB/s（460KB ~17s 传完）——WebKit 锁相机 30fps，Web 层光学上限 |
 
-视觉通道看设备——相机和屏幕都影响命中率。点 **🍎 苹果 / 🤖 安卓预设按钮**（实测甜点）直达，
-或盯统计行（扫描/解码每秒）调滑块：先抬 FPS，再抬单帧，解码跟不上了就回退一格；完成卡会显示传输耗时与 KB/s。
+视觉通道看设备——相机和屏幕都影响命中率。默认即实测甜点（50 FPS / 1300 B）；
+弱机盯统计行（扫描/解码每秒）调滑块：先降 FPS，再降单帧，解码跟不上就回退一格；完成卡会显示传输耗时与 KB/s。
 
 ### 快速上手
 
